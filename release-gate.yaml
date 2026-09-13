@@ -1,0 +1,18 @@
+# TrajectEvo 轨迹级发布门禁配置
+# 用法：python -m evoagent.trajectory gate --baseline baseline.json --candidate candidate.json --config release-gate.yaml
+# 任一 block 级规则违规 => BLOCK（进程退出码 1，CI 失败）；仅 warning 级违规 => WARNING。
+
+thresholds:
+  # ---- 质量组（block：不达标直接阻断发布）----
+  minimum_success_rate: 0.90              # 候选版本任务成功率下限
+  maximum_success_rate_drop: 0.03         # 相对基线的成功率最大跌幅
+  minimum_tool_selection_accuracy: 0.95   # 工具选择准确率下限
+  maximum_critical_task_regressions: 0    # 关键任务回归条数上限（0 容忍）
+
+  # ---- 预警组（warning：提示但不阻断）----
+  maximum_task_regressions: 0             # 普通任务回归条数上限
+
+  # ---- 成本组 ----
+  maximum_average_latency_ms: 2000.0      # 单任务平均延迟上限（毫秒）
+  maximum_average_total_tokens: 20000     # 单任务平均 token 上限
+  maximum_average_cost_usd: 0.05          # 单任务平均成本上限（美元）

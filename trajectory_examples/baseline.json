@@ -1,0 +1,746 @@
+{
+  "sec_001": {
+    "version": "baseline",
+    "answer": "AST analysis found no structural defect. Security scanners (semgrep/bandit) finished clean.",
+    "spans": [
+      {
+        "step": 1,
+        "kind": "planner",
+        "name": "plan",
+        "input": "Review SQL sink in service_1.py",
+        "output": null,
+        "error": null,
+        "start_time_ms": 0,
+        "end_time_ms": 12,
+        "prompt_tokens": 16,
+        "completion_tokens": 8,
+        "cost_usd": 6e-06
+      },
+      {
+        "step": 2,
+        "kind": "tool",
+        "name": "ast_analyze",
+        "input": {
+          "target": "sec_001"
+        },
+        "output": "AST analysis found no structural defect.",
+        "error": null,
+        "start_time_ms": 12,
+        "end_time_ms": 21,
+        "prompt_tokens": 6,
+        "completion_tokens": 4,
+        "cost_usd": 3e-06
+      },
+      {
+        "step": 3,
+        "kind": "tool",
+        "name": "run_scanners",
+        "input": {
+          "target": "sec_001"
+        },
+        "output": "Security scanners (semgrep/bandit) finished clean.",
+        "error": null,
+        "start_time_ms": 21,
+        "end_time_ms": 31,
+        "prompt_tokens": 6,
+        "completion_tokens": 4,
+        "cost_usd": 3e-06
+      },
+      {
+        "step": 4,
+        "kind": "final",
+        "name": "final_answer",
+        "input": null,
+        "output": "AST analysis found no structural defect. Security scanners (semgrep/bandit) finished clean.",
+        "error": null,
+        "start_time_ms": 31,
+        "end_time_ms": 41,
+        "prompt_tokens": 10,
+        "completion_tokens": 10,
+        "cost_usd": 7.5e-06
+      }
+    ]
+  },
+  "sec_002": {
+    "version": "baseline",
+    "answer": "AST analysis found no structural defect. Security scanners (semgrep/bandit) finished clean.",
+    "spans": [
+      {
+        "step": 1,
+        "kind": "planner",
+        "name": "plan",
+        "input": "Review SQL sink in service_2.py",
+        "output": null,
+        "error": null,
+        "start_time_ms": 0,
+        "end_time_ms": 12,
+        "prompt_tokens": 16,
+        "completion_tokens": 8,
+        "cost_usd": 6e-06
+      },
+      {
+        "step": 2,
+        "kind": "tool",
+        "name": "ast_analyze",
+        "input": {
+          "target": "sec_002"
+        },
+        "output": "AST analysis found no structural defect.",
+        "error": null,
+        "start_time_ms": 12,
+        "end_time_ms": 21,
+        "prompt_tokens": 6,
+        "completion_tokens": 4,
+        "cost_usd": 3e-06
+      },
+      {
+        "step": 3,
+        "kind": "tool",
+        "name": "run_scanners",
+        "input": {
+          "target": "sec_002"
+        },
+        "output": "Security scanners (semgrep/bandit) finished clean.",
+        "error": null,
+        "start_time_ms": 21,
+        "end_time_ms": 31,
+        "prompt_tokens": 6,
+        "completion_tokens": 4,
+        "cost_usd": 3e-06
+      },
+      {
+        "step": 4,
+        "kind": "final",
+        "name": "final_answer",
+        "input": null,
+        "output": "AST analysis found no structural defect. Security scanners (semgrep/bandit) finished clean.",
+        "error": null,
+        "start_time_ms": 31,
+        "end_time_ms": 41,
+        "prompt_tokens": 10,
+        "completion_tokens": 10,
+        "cost_usd": 7.5e-06
+      }
+    ]
+  },
+  "sec_003": {
+    "version": "baseline",
+    "answer": "AST analysis found no structural defect. Security scanners (semgrep/bandit) finished clean.",
+    "spans": [
+      {
+        "step": 1,
+        "kind": "planner",
+        "name": "plan",
+        "input": "Review SQL sink in service_3.py",
+        "output": null,
+        "error": null,
+        "start_time_ms": 0,
+        "end_time_ms": 12,
+        "prompt_tokens": 16,
+        "completion_tokens": 8,
+        "cost_usd": 6e-06
+      },
+      {
+        "step": 2,
+        "kind": "tool",
+        "name": "ast_analyze",
+        "input": {
+          "target": "sec_003"
+        },
+        "output": "AST analysis found no structural defect.",
+        "error": null,
+        "start_time_ms": 12,
+        "end_time_ms": 21,
+        "prompt_tokens": 6,
+        "completion_tokens": 4,
+        "cost_usd": 3e-06
+      },
+      {
+        "step": 3,
+        "kind": "tool",
+        "name": "run_scanners",
+        "input": {
+          "target": "sec_003"
+        },
+        "output": "Security scanners (semgrep/bandit) finished clean.",
+        "error": null,
+        "start_time_ms": 21,
+        "end_time_ms": 31,
+        "prompt_tokens": 6,
+        "completion_tokens": 4,
+        "cost_usd": 3e-06
+      },
+      {
+        "step": 4,
+        "kind": "final",
+        "name": "final_answer",
+        "input": null,
+        "output": "AST analysis found no structural defect. Security scanners (semgrep/bandit) finished clean.",
+        "error": null,
+        "start_time_ms": 31,
+        "end_time_ms": 41,
+        "prompt_tokens": 10,
+        "completion_tokens": 10,
+        "cost_usd": 7.5e-06
+      }
+    ]
+  },
+  "sec_004": {
+    "version": "baseline",
+    "answer": "AST analysis found no structural defect. Security scanners (semgrep/bandit) finished clean.",
+    "spans": [
+      {
+        "step": 1,
+        "kind": "planner",
+        "name": "plan",
+        "input": "Review SQL sink in service_4.py",
+        "output": null,
+        "error": null,
+        "start_time_ms": 0,
+        "end_time_ms": 12,
+        "prompt_tokens": 16,
+        "completion_tokens": 8,
+        "cost_usd": 6e-06
+      },
+      {
+        "step": 2,
+        "kind": "tool",
+        "name": "ast_analyze",
+        "input": {
+          "target": "sec_004"
+        },
+        "output": "AST analysis found no structural defect.",
+        "error": null,
+        "start_time_ms": 12,
+        "end_time_ms": 21,
+        "prompt_tokens": 6,
+        "completion_tokens": 4,
+        "cost_usd": 3e-06
+      },
+      {
+        "step": 3,
+        "kind": "tool",
+        "name": "run_scanners",
+        "input": {
+          "target": "sec_004"
+        },
+        "output": "Security scanners (semgrep/bandit) finished clean.",
+        "error": null,
+        "start_time_ms": 21,
+        "end_time_ms": 31,
+        "prompt_tokens": 6,
+        "completion_tokens": 4,
+        "cost_usd": 3e-06
+      },
+      {
+        "step": 4,
+        "kind": "final",
+        "name": "final_answer",
+        "input": null,
+        "output": "AST analysis found no structural defect. Security scanners (semgrep/bandit) finished clean.",
+        "error": null,
+        "start_time_ms": 31,
+        "end_time_ms": 41,
+        "prompt_tokens": 10,
+        "completion_tokens": 10,
+        "cost_usd": 7.5e-06
+      }
+    ]
+  },
+  "rel_001": {
+    "version": "baseline",
+    "answer": "AST analysis found no structural defect. Symbol definitions and call sites resolved.",
+    "spans": [
+      {
+        "step": 1,
+        "kind": "planner",
+        "name": "plan",
+        "input": "Check null dereference path 1",
+        "output": null,
+        "error": null,
+        "start_time_ms": 0,
+        "end_time_ms": 12,
+        "prompt_tokens": 16,
+        "completion_tokens": 8,
+        "cost_usd": 6e-06
+      },
+      {
+        "step": 2,
+        "kind": "tool",
+        "name": "ast_analyze",
+        "input": {
+          "target": "rel_001"
+        },
+        "output": "AST analysis found no structural defect.",
+        "error": null,
+        "start_time_ms": 12,
+        "end_time_ms": 21,
+        "prompt_tokens": 6,
+        "completion_tokens": 4,
+        "cost_usd": 3e-06
+      },
+      {
+        "step": 3,
+        "kind": "tool",
+        "name": "symbol",
+        "input": {
+          "target": "rel_001"
+        },
+        "output": "Symbol definitions and call sites resolved.",
+        "error": null,
+        "start_time_ms": 21,
+        "end_time_ms": 30,
+        "prompt_tokens": 6,
+        "completion_tokens": 4,
+        "cost_usd": 3e-06
+      },
+      {
+        "step": 4,
+        "kind": "final",
+        "name": "final_answer",
+        "input": null,
+        "output": "AST analysis found no structural defect. Symbol definitions and call sites resolved.",
+        "error": null,
+        "start_time_ms": 30,
+        "end_time_ms": 40,
+        "prompt_tokens": 10,
+        "completion_tokens": 10,
+        "cost_usd": 7.5e-06
+      }
+    ]
+  },
+  "rel_002": {
+    "version": "baseline",
+    "answer": "AST analysis found no structural defect. Symbol definitions and call sites resolved.",
+    "spans": [
+      {
+        "step": 1,
+        "kind": "planner",
+        "name": "plan",
+        "input": "Check null dereference path 2",
+        "output": null,
+        "error": null,
+        "start_time_ms": 0,
+        "end_time_ms": 12,
+        "prompt_tokens": 16,
+        "completion_tokens": 8,
+        "cost_usd": 6e-06
+      },
+      {
+        "step": 2,
+        "kind": "tool",
+        "name": "ast_analyze",
+        "input": {
+          "target": "rel_002"
+        },
+        "output": "AST analysis found no structural defect.",
+        "error": null,
+        "start_time_ms": 12,
+        "end_time_ms": 21,
+        "prompt_tokens": 6,
+        "completion_tokens": 4,
+        "cost_usd": 3e-06
+      },
+      {
+        "step": 3,
+        "kind": "tool",
+        "name": "symbol",
+        "input": {
+          "target": "rel_002"
+        },
+        "output": "Symbol definitions and call sites resolved.",
+        "error": null,
+        "start_time_ms": 21,
+        "end_time_ms": 30,
+        "prompt_tokens": 6,
+        "completion_tokens": 4,
+        "cost_usd": 3e-06
+      },
+      {
+        "step": 4,
+        "kind": "final",
+        "name": "final_answer",
+        "input": null,
+        "output": "AST analysis found no structural defect. Symbol definitions and call sites resolved.",
+        "error": null,
+        "start_time_ms": 30,
+        "end_time_ms": 40,
+        "prompt_tokens": 10,
+        "completion_tokens": 10,
+        "cost_usd": 7.5e-06
+      }
+    ]
+  },
+  "rel_003": {
+    "version": "baseline",
+    "answer": "AST analysis found no structural defect. Symbol definitions and call sites resolved.",
+    "spans": [
+      {
+        "step": 1,
+        "kind": "planner",
+        "name": "plan",
+        "input": "Check null dereference path 3",
+        "output": null,
+        "error": null,
+        "start_time_ms": 0,
+        "end_time_ms": 12,
+        "prompt_tokens": 16,
+        "completion_tokens": 8,
+        "cost_usd": 6e-06
+      },
+      {
+        "step": 2,
+        "kind": "tool",
+        "name": "ast_analyze",
+        "input": {
+          "target": "rel_003"
+        },
+        "output": "AST analysis found no structural defect.",
+        "error": null,
+        "start_time_ms": 12,
+        "end_time_ms": 21,
+        "prompt_tokens": 6,
+        "completion_tokens": 4,
+        "cost_usd": 3e-06
+      },
+      {
+        "step": 3,
+        "kind": "tool",
+        "name": "symbol",
+        "input": {
+          "target": "rel_003"
+        },
+        "output": "Symbol definitions and call sites resolved.",
+        "error": null,
+        "start_time_ms": 21,
+        "end_time_ms": 30,
+        "prompt_tokens": 6,
+        "completion_tokens": 4,
+        "cost_usd": 3e-06
+      },
+      {
+        "step": 4,
+        "kind": "final",
+        "name": "final_answer",
+        "input": null,
+        "output": "AST analysis found no structural defect. Symbol definitions and call sites resolved.",
+        "error": null,
+        "start_time_ms": 30,
+        "end_time_ms": 40,
+        "prompt_tokens": 10,
+        "completion_tokens": 10,
+        "cost_usd": 7.5e-06
+      }
+    ]
+  },
+  "rel_004": {
+    "version": "baseline",
+    "answer": "AST analysis found no structural defect. Symbol definitions and call sites resolved.",
+    "spans": [
+      {
+        "step": 1,
+        "kind": "planner",
+        "name": "plan",
+        "input": "Check null dereference path 4",
+        "output": null,
+        "error": null,
+        "start_time_ms": 0,
+        "end_time_ms": 12,
+        "prompt_tokens": 16,
+        "completion_tokens": 8,
+        "cost_usd": 6e-06
+      },
+      {
+        "step": 2,
+        "kind": "tool",
+        "name": "ast_analyze",
+        "input": {
+          "target": "rel_004"
+        },
+        "output": "AST analysis found no structural defect.",
+        "error": null,
+        "start_time_ms": 12,
+        "end_time_ms": 21,
+        "prompt_tokens": 6,
+        "completion_tokens": 4,
+        "cost_usd": 3e-06
+      },
+      {
+        "step": 3,
+        "kind": "tool",
+        "name": "symbol",
+        "input": {
+          "target": "rel_004"
+        },
+        "output": "Symbol definitions and call sites resolved.",
+        "error": null,
+        "start_time_ms": 21,
+        "end_time_ms": 30,
+        "prompt_tokens": 6,
+        "completion_tokens": 4,
+        "cost_usd": 3e-06
+      },
+      {
+        "step": 4,
+        "kind": "final",
+        "name": "final_answer",
+        "input": null,
+        "output": "AST analysis found no structural defect. Symbol definitions and call sites resolved.",
+        "error": null,
+        "start_time_ms": 30,
+        "end_time_ms": 40,
+        "prompt_tokens": 10,
+        "completion_tokens": 10,
+        "cost_usd": 7.5e-06
+      }
+    ]
+  },
+  "secret_001": {
+    "version": "baseline",
+    "answer": "Git blame and recent change context collected. Security scanners (semgrep/bandit) finished clean.",
+    "spans": [
+      {
+        "step": 1,
+        "kind": "planner",
+        "name": "plan",
+        "input": "Inspect committed credential candidate 1",
+        "output": null,
+        "error": null,
+        "start_time_ms": 0,
+        "end_time_ms": 12,
+        "prompt_tokens": 16,
+        "completion_tokens": 8,
+        "cost_usd": 6e-06
+      },
+      {
+        "step": 2,
+        "kind": "tool",
+        "name": "git_context",
+        "input": {
+          "target": "secret_001"
+        },
+        "output": "Git blame and recent change context collected.",
+        "error": null,
+        "start_time_ms": 12,
+        "end_time_ms": 21,
+        "prompt_tokens": 6,
+        "completion_tokens": 4,
+        "cost_usd": 3e-06
+      },
+      {
+        "step": 3,
+        "kind": "tool",
+        "name": "run_scanners",
+        "input": {
+          "target": "secret_001"
+        },
+        "output": "Security scanners (semgrep/bandit) finished clean.",
+        "error": null,
+        "start_time_ms": 21,
+        "end_time_ms": 31,
+        "prompt_tokens": 6,
+        "completion_tokens": 4,
+        "cost_usd": 3e-06
+      },
+      {
+        "step": 4,
+        "kind": "final",
+        "name": "final_answer",
+        "input": null,
+        "output": "Git blame and recent change context collected. Security scanners (semgrep/bandit) finished clean.",
+        "error": null,
+        "start_time_ms": 31,
+        "end_time_ms": 41,
+        "prompt_tokens": 10,
+        "completion_tokens": 10,
+        "cost_usd": 7.5e-06
+      }
+    ]
+  },
+  "secret_002": {
+    "version": "baseline",
+    "answer": "Git blame and recent change context collected. Security scanners (semgrep/bandit) finished clean.",
+    "spans": [
+      {
+        "step": 1,
+        "kind": "planner",
+        "name": "plan",
+        "input": "Inspect committed credential candidate 2",
+        "output": null,
+        "error": null,
+        "start_time_ms": 0,
+        "end_time_ms": 12,
+        "prompt_tokens": 16,
+        "completion_tokens": 8,
+        "cost_usd": 6e-06
+      },
+      {
+        "step": 2,
+        "kind": "tool",
+        "name": "git_context",
+        "input": {
+          "target": "secret_002"
+        },
+        "output": "Git blame and recent change context collected.",
+        "error": null,
+        "start_time_ms": 12,
+        "end_time_ms": 21,
+        "prompt_tokens": 6,
+        "completion_tokens": 4,
+        "cost_usd": 3e-06
+      },
+      {
+        "step": 3,
+        "kind": "tool",
+        "name": "run_scanners",
+        "input": {
+          "target": "secret_002"
+        },
+        "output": "Security scanners (semgrep/bandit) finished clean.",
+        "error": null,
+        "start_time_ms": 21,
+        "end_time_ms": 31,
+        "prompt_tokens": 6,
+        "completion_tokens": 4,
+        "cost_usd": 3e-06
+      },
+      {
+        "step": 4,
+        "kind": "final",
+        "name": "final_answer",
+        "input": null,
+        "output": "Git blame and recent change context collected. Security scanners (semgrep/bandit) finished clean.",
+        "error": null,
+        "start_time_ms": 31,
+        "end_time_ms": 41,
+        "prompt_tokens": 10,
+        "completion_tokens": 10,
+        "cost_usd": 7.5e-06
+      }
+    ]
+  },
+  "compat_001": {
+    "version": "baseline",
+    "answer": "Symbol definitions and call sites resolved. Typecheck passed on changed files.",
+    "spans": [
+      {
+        "step": 1,
+        "kind": "planner",
+        "name": "plan",
+        "input": "Check public API signature change 1",
+        "output": null,
+        "error": null,
+        "start_time_ms": 0,
+        "end_time_ms": 12,
+        "prompt_tokens": 16,
+        "completion_tokens": 8,
+        "cost_usd": 6e-06
+      },
+      {
+        "step": 2,
+        "kind": "tool",
+        "name": "symbol",
+        "input": {
+          "target": "compat_001"
+        },
+        "output": "Symbol definitions and call sites resolved.",
+        "error": null,
+        "start_time_ms": 12,
+        "end_time_ms": 21,
+        "prompt_tokens": 6,
+        "completion_tokens": 4,
+        "cost_usd": 3e-06
+      },
+      {
+        "step": 3,
+        "kind": "tool",
+        "name": "typecheck",
+        "input": {
+          "target": "compat_001"
+        },
+        "output": "Typecheck passed on changed files.",
+        "error": null,
+        "start_time_ms": 21,
+        "end_time_ms": 33,
+        "prompt_tokens": 6,
+        "completion_tokens": 4,
+        "cost_usd": 3e-06
+      },
+      {
+        "step": 4,
+        "kind": "final",
+        "name": "final_answer",
+        "input": null,
+        "output": "Symbol definitions and call sites resolved. Typecheck passed on changed files.",
+        "error": null,
+        "start_time_ms": 33,
+        "end_time_ms": 43,
+        "prompt_tokens": 10,
+        "completion_tokens": 10,
+        "cost_usd": 7.5e-06
+      }
+    ]
+  },
+  "compat_002": {
+    "version": "baseline",
+    "answer": "Symbol definitions and call sites resolved. Typecheck passed on changed files.",
+    "spans": [
+      {
+        "step": 1,
+        "kind": "planner",
+        "name": "plan",
+        "input": "Check public API signature change 2",
+        "output": null,
+        "error": null,
+        "start_time_ms": 0,
+        "end_time_ms": 12,
+        "prompt_tokens": 16,
+        "completion_tokens": 8,
+        "cost_usd": 6e-06
+      },
+      {
+        "step": 2,
+        "kind": "tool",
+        "name": "symbol",
+        "input": {
+          "target": "compat_002"
+        },
+        "output": "Symbol definitions and call sites resolved.",
+        "error": null,
+        "start_time_ms": 12,
+        "end_time_ms": 21,
+        "prompt_tokens": 6,
+        "completion_tokens": 4,
+        "cost_usd": 3e-06
+      },
+      {
+        "step": 3,
+        "kind": "tool",
+        "name": "typecheck",
+        "input": {
+          "target": "compat_002"
+        },
+        "output": "Typecheck passed on changed files.",
+        "error": null,
+        "start_time_ms": 21,
+        "end_time_ms": 33,
+        "prompt_tokens": 6,
+        "completion_tokens": 4,
+        "cost_usd": 3e-06
+      },
+      {
+        "step": 4,
+        "kind": "final",
+        "name": "final_answer",
+        "input": null,
+        "output": "Symbol definitions and call sites resolved. Typecheck passed on changed files.",
+        "error": null,
+        "start_time_ms": 33,
+        "end_time_ms": 43,
+        "prompt_tokens": 10,
+        "completion_tokens": 10,
+        "cost_usd": 7.5e-06
+      }
+    ]
+  }
+}
