@@ -1,0 +1,405 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "EvoAgent PR 审查系统链路",
+    "output": "evoagent-architecture.html",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "main-path",
+        "label": "主审查链路",
+        "focus": [
+          "github",
+          "api",
+          "service",
+          "queue",
+          "harness",
+          "router",
+          "llm"
+        ],
+        "note": "从 GitHub PR 事件到 Agentic 多 Agent 审查的完整链路。"
+      },
+      {
+        "id": "fix-loop",
+        "label": "自动修复闭环",
+        "focus": [
+          "service",
+          "fixer",
+          "github"
+        ],
+        "note": "修复触发 → AST/CST 修复 + 沙箱测试门禁 → fix-pr-* 分支。"
+      },
+      {
+        "id": "evolution-loop",
+        "label": "进化闭环",
+        "focus": [
+          "service",
+          "evo",
+          "harness"
+        ],
+        "note": "失败案例回流 → 提示词 / Skill 版本化评测 → 灰度与影子流量。"
+      }
+    ]
+  },
+  "components": [
+    {
+      "id": "github",
+      "type": "external",
+      "label": "GitHub",
+      "sublabel": "PR 事件 · 修复分支",
+      "pos": [
+        30,
+        220
+      ],
+      "size": [
+        122,
+        60
+      ]
+    },
+    {
+      "id": "web",
+      "type": "frontend",
+      "label": "Web 管理台",
+      "sublabel": "Dashboard / 登录",
+      "pos": [
+        176,
+        80
+      ],
+      "size": [
+        126,
+        60
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "API Server",
+      "sublabel": "ApiHandler :8080",
+      "tag": "Auth · RBAC · HMAC",
+      "pos": [
+        176,
+        220
+      ],
+      "size": [
+        126,
+        60
+      ]
+    },
+    {
+      "id": "service",
+      "type": "backend",
+      "label": "ReviewService",
+      "sublabel": "任务编排 / 调度",
+      "pos": [
+        326,
+        220
+      ],
+      "size": [
+        126,
+        60
+      ]
+    },
+    {
+      "id": "queue",
+      "type": "messagebus",
+      "label": "TaskQueue",
+      "sublabel": "Redis Streams",
+      "tag": "ACK · 租约 · DLQ",
+      "pos": [
+        476,
+        220
+      ],
+      "size": [
+        126,
+        60
+      ]
+    },
+    {
+      "id": "harness",
+      "type": "backend",
+      "label": "ReviewHarness",
+      "sublabel": "Agent Runtime · 记忆",
+      "tag": "checkpoint · trace",
+      "pos": [
+        626,
+        220
+      ],
+      "size": [
+        126,
+        60
+      ]
+    },
+    {
+      "id": "router",
+      "type": "backend",
+      "label": "ModeRouter",
+      "sublabel": "Lead · Security",
+      "tag": "Correctness · Critic",
+      "pos": [
+        776,
+        220
+      ],
+      "size": [
+        126,
+        60
+      ]
+    },
+    {
+      "id": "llm",
+      "type": "external",
+      "label": "LLM Provider",
+      "sublabel": "DeepSeek / OpenRouter / custom",
+      "pos": [
+        626,
+        380
+      ],
+      "size": [
+        126,
+        60
+      ]
+    },
+    {
+      "id": "fixer",
+      "type": "backend",
+      "label": "SafeFixer",
+      "sublabel": "AST/CST 修复 · 测试验证",
+      "pos": [
+        30,
+        380
+      ],
+      "size": [
+        122,
+        60
+      ]
+    },
+    {
+      "id": "evo",
+      "type": "backend",
+      "label": "Evolution",
+      "sublabel": "提示词 / Skill 进化",
+      "tag": "反馈回流 · 灰度",
+      "pos": [
+        326,
+        380
+      ],
+      "size": [
+        126,
+        60
+      ]
+    },
+    {
+      "id": "store",
+      "type": "database",
+      "label": "TaskStore",
+      "sublabel": "SQLite / PostgreSQL",
+      "pos": [
+        476,
+        380
+      ],
+      "size": [
+        126,
+        60
+      ]
+    },
+    {
+      "id": "gates",
+      "type": "backend",
+      "label": "Gates & Report",
+      "sublabel": "门禁 · Markdown 报告",
+      "pos": [
+        776,
+        380
+      ],
+      "size": [
+        126,
+        60
+      ]
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "security-group",
+      "label": "EvoAgent 服务进程",
+      "wraps": [
+        "web",
+        "api",
+        "service",
+        "harness",
+        "router",
+        "gates",
+        "fixer",
+        "evo"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "持久化与队列",
+      "wraps": [
+        "store",
+        "queue"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "label": "webhook · HMAC-SHA256",
+      "from": "github",
+      "to": "api",
+      "variant": "emphasis",
+      "id": "gh-api",
+      "labelAt": [
+        164,
+        202
+      ]
+    },
+    {
+      "label": "REST /v1/*",
+      "from": "web",
+      "to": "api",
+      "id": "web-api",
+      "labelAt": [
+        239,
+        150
+      ]
+    },
+    {
+      "label": "create_review",
+      "from": "api",
+      "to": "service",
+      "variant": "emphasis",
+      "id": "api-svc",
+      "labelAt": [
+        314,
+        202
+      ]
+    },
+    {
+      "label": "任务状态",
+      "from": "service",
+      "to": "store",
+      "id": "svc-store"
+    },
+    {
+      "label": "enqueue 异步",
+      "from": "service",
+      "to": "queue",
+      "variant": "emphasis",
+      "id": "svc-queue",
+      "labelAt": [
+        464,
+        182
+      ]
+    },
+    {
+      "label": "worker · lease",
+      "from": "queue",
+      "to": "harness",
+      "variant": "emphasis",
+      "id": "queue-harness",
+      "labelAt": [
+        614,
+        202
+      ]
+    },
+    {
+      "label": "agentic 调度",
+      "from": "harness",
+      "to": "router",
+      "variant": "emphasis",
+      "id": "harness-router",
+      "labelAt": [
+        764,
+        202
+      ]
+    },
+    {
+      "label": "Chat Completions",
+      "from": "router",
+      "to": "llm",
+      "variant": "emphasis",
+      "id": "router-llm"
+    },
+    {
+      "label": "Finding 门禁",
+      "from": "router",
+      "to": "gates",
+      "id": "router-gates",
+      "labelAt": [
+        839,
+        300
+      ]
+    },
+    {
+      "label": "checkpoint · 轨迹",
+      "from": "harness",
+      "to": "store",
+      "id": "harness-store"
+    },
+    {
+      "label": "触发修复",
+      "from": "service",
+      "to": "fixer",
+      "id": "svc-fixer",
+      "fromSide": "bottom",
+      "toSide": "right"
+    },
+    {
+      "label": "fix-pr-* 分支",
+      "from": "fixer",
+      "to": "github",
+      "variant": "dashed",
+      "id": "fixer-gh"
+    },
+    {
+      "label": "反馈回流",
+      "from": "service",
+      "to": "evo",
+      "id": "svc-evo",
+      "labelAt": [
+        350,
+        294
+      ]
+    },
+    {
+      "label": "版本激活 · 灰度",
+      "from": "evo",
+      "to": "service",
+      "id": "evo-svc",
+      "labelAt": [
+        330,
+        336
+      ]
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "入口与信任边界",
+      "items": [
+        "GitHub PR webhook：opened / reopened / synchronize",
+        "HMAC-SHA256 签名校验 · 登录 / RBAC / 租户隔离",
+        "Web 管理台与 JSON API 共用 ThreadingHTTPServer"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "核心审查链路",
+      "items": [
+        "DiffParser 解析统一 diff → Agentic 四角色审查",
+        "Lead 主 Agent 动态委派 · Security / Correctness 并行扫描",
+        "Critic 盲审与证据挑战 · checkpoint / budget / trace"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "可靠性与进化",
+      "items": [
+        "Redis Streams：ACK / 租约 / 退避 / 死信 · SQLite / PostgreSQL",
+        "SafeFixer：LLM patch + AST/CST + 沙箱门禁 → fix-pr-* 分支",
+        "失败回流 → 提示词 / Skill 版本化评测 → 灰度"
+      ]
+    }
+  ]
+}
