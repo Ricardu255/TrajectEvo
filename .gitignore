@@ -9,3 +9,8 @@ dist/
 .venv/
 venv/
 
+# 个人学习材料，仅本地保留，不入库
+EVO-Python-语法教学.md
+EVO-源码学习计划书.md
+TrajectIQ-代码导读.md
+
