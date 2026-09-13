@@ -1,4 +1,6 @@
-# EvoAgent PR Reviewer
+# TrajectEvo · Agent 代码审查与自进化平台
+
+> TrajectEvo（Trajectory + Evolution）：在多角色 Agent 代码审查与提示词自进化之上，提供 Agent 轨迹级回归评测、首错归因与 CI 发布门禁。
 
 - 审查统一 diff，输出结构化问题、修复建议和测试建议
 - GitHub `pull_request` webhook（`opened`、`reopened`、`synchronize`）
@@ -20,6 +22,9 @@
 - 动态 Skill manifest 校验、签名校验和隔离进程沙箱
 - 自动修复后的编译/测试门禁、灰度发布与影子流量
 - OpenTelemetry Trace、Prometheus 指标和持久化告警
+- 轨迹级回归评测：对同一评测任务集双跑两个版本，识别“基线通过、候选失败”的回归任务，并按任务类别切片对比质量与成本
+- 首错归因：逐 step 对齐工具调用轨迹，定位第一处工具选择 / 参数 / 执行 / 生成分歧
+- YAML 发布门禁：输出 PASS / WARNING / BLOCK，BLOCK 以退出码 1 直接阻断 CI（见 `release-gate.yaml`）
 
 ## 快速开始
 
@@ -74,6 +79,28 @@ Invoke-WebRequest -Headers $headers http://127.0.0.1:8080/v1/tasks/<task-id>/rep
 ```powershell
 python -m unittest discover -s tests -v
 ```
+
+## 轨迹级回归与发布门禁
+
+`evoagent/trajectory.py` 在与具体 Agent 实现解耦的标准化轨迹（`TrajectorySpan` 列表）上做版本回归：任务三断言（工具链 / 参数 / 答案）、版本指标对比、首错归因和 YAML 门禁。
+
+无需 API Key 的离线演示（内置代码审查场景夹具，baseline 全过、regression 被 BLOCK、fixed 全过）：
+
+```powershell
+python -m evoagent.trajectory demo
+```
+
+真实使用时，先把两个版本各自跑出的轨迹结果存成 JSON（key 为任务 id），再离线对比与门禁评估：
+
+```powershell
+# 对比两个版本，输出 Markdown 回归报告（--format json 可输出结构化结果）
+python -m evoagent.trajectory compare --baseline trajectory_examples/baseline.json --candidate trajectory_examples/regression.json
+
+# 按 release-gate.yaml 阈值评估发布门禁；BLOCK 时进程退出码为 1，可直接接入 CI
+python -m evoagent.trajectory gate --baseline trajectory_examples/baseline.json --candidate trajectory_examples/regression.json --config release-gate.yaml
+```
+
+真实多角色 Agent 的轨迹由 `ledger_to_spans(ExecutionLedger.summary())` 适配而来：每次工具调用的入参、成败、耗时与错误都会还原成标准 tool span，因此门禁评测对象是真实 Agent，而不是规则模拟器。示例结果文件见 `trajectory_examples/`。
 
 ## 模型配置
 
