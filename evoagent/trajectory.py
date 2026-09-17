@@ -20,7 +20,7 @@
 """
 import argparse
 import json
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -218,15 +218,32 @@ def _get_tool_spans(result: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [span for span in result.get("spans", []) if span.get("kind") == "tool"]
 
 
+def _expected_arguments_match(expected: Dict[str, Any], actual: Any) -> bool:
+    """子集语义：任务声明的每个期望参数都必须在实际入参中出现且相等。
+
+    实际入参携带的额外键（如 request_id、时间戳等与断言无关的字段）不会导致失败，
+    从而避免"整个 dict 精确相等"对无关字段过度敏感。
+    """
+    if not isinstance(actual, dict):
+        return False
+    for key, expected_value in (expected or {}).items():
+        if key not in actual or actual[key] != expected_value:
+            return False
+    return True
+
+
 def evaluate_task(*, task: TrajectoryTask, result: Dict[str, Any]) -> TaskEvaluation:
-    """三断言评测：工具链完全一致 + 每工具参数一致 + 答案包含期望文本。"""
+    """三断言评测：工具链完全一致 + 关键参数子集匹配 + 答案包含期望文本。"""
     tool_spans = _get_tool_spans(result)
     actual_tools = tuple(span["name"] for span in tool_spans)
     # ① 工具选择：实际工具序列必须与期望完全一致（顺序敏感）
     has_correct_tools = actual_tools == task.expected_tools
-    # ② 工具参数：工具链正确的前提下，逐工具比对入参；任务未规定的工具不校验
+    # ② 工具参数：工具链正确的前提下，逐工具校验"声明的期望参数"是实际入参子集；
+    #    任务未规定参数的工具不校验，实际入参里的额外无关字段不判错
     has_correct_arguments = has_correct_tools and all(
-        span["input"] == task.expected_arguments.get(span["name"], span["input"])
+        _expected_arguments_match(
+            task.expected_arguments.get(span["name"], {}), span.get("input")
+        )
         for span in tool_spans
     )
     # ③ 答案覆盖：所有期望子串都必须出现在最终答案中（大小写不敏感）
@@ -254,6 +271,8 @@ def evaluate_results(
     results_by_task_id: Dict[str, Dict[str, Any]],
 ) -> Tuple[VersionMetrics, Tuple[TaskEvaluation, ...]]:
     """评测一个版本在整份任务集上的表现（输入为标准化轨迹集合）。"""
+    if not tasks:
+        raise ValueError("Cannot evaluate an empty task set.")
     missing = [task.task_id for task in tasks if task.task_id not in results_by_task_id]
     if missing:
         raise ValueError("Missing trajectory results for tasks: %s" % ", ".join(sorted(missing)))
@@ -293,6 +312,20 @@ def compare_results(
     dataset_name: str,
 ) -> RegressionReport:
     """对比两个版本的标准化轨迹集合，产出回归报告。"""
+    if not tasks:
+        raise ValueError("Cannot compare versions on an empty task set.")
+    task_ids = {task.task_id for task in tasks}
+    missing_baseline = sorted(task_ids - set(baseline_results))
+    missing_candidate = sorted(task_ids - set(candidate_results))
+    coverage_problems = []
+    if missing_baseline:
+        coverage_problems.append("baseline missing results for: %s" % ", ".join(missing_baseline))
+    if missing_candidate:
+        coverage_problems.append("candidate missing results for: %s" % ", ".join(missing_candidate))
+    if coverage_problems:
+        raise ValueError(
+            "Trajectory results do not cover the task set; " + "; ".join(coverage_problems)
+        )
     baseline_metrics, baseline_evaluations = evaluate_results(
         version_name=baseline_name, tasks=tasks, results_by_task_id=baseline_results
     )
@@ -442,22 +475,54 @@ DEFAULT_THRESHOLDS: Dict[str, Any] = {
 }
 
 
-def load_gate_config(path: Path) -> Dict[str, Any]:
-    """加载并校验 YAML 门禁配置（必须包含 thresholds 映射）。"""
-    import yaml
+def validate_gate_config(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """校验门禁配置：thresholds 键名合法、severity_overrides 的规则与级别合法。
 
-    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    拼错的阈值键若被静默忽略，会让门禁在"以为已收紧"时仍按默认值放行，因此这里
+    采取 fail-fast：遇到未知键或非法 severity 直接报错。
+    """
     if not isinstance(payload, dict):
         raise ValueError("Gate configuration must be a YAML mapping.")
     thresholds = payload.get("thresholds")
     if not isinstance(thresholds, dict):
         raise ValueError("Gate configuration must contain a thresholds mapping.")
+    unknown_thresholds = sorted(set(thresholds) - set(DEFAULT_THRESHOLDS))
+    if unknown_thresholds:
+        raise ValueError(
+            "Unknown gate threshold key(s): %s; allowed keys are: %s"
+            % (", ".join(unknown_thresholds), ", ".join(sorted(DEFAULT_THRESHOLDS)))
+        )
+    overrides = payload.get("severity_overrides", {}) or {}
+    if not isinstance(overrides, dict):
+        raise ValueError("severity_overrides must be a mapping of rule -> severity.")
+    unknown_rules = sorted(set(overrides) - set(DEFAULT_THRESHOLDS))
+    if unknown_rules:
+        raise ValueError(
+            "severity_overrides references unknown rule(s): %s" % ", ".join(unknown_rules)
+        )
+    bad_severity_rules = sorted(
+        rule for rule, severity in overrides.items() if severity not in ("block", "warning")
+    )
+    if bad_severity_rules:
+        raise ValueError(
+            "severity_overrides values must be 'block' or 'warning'; invalid rules: %s"
+            % ", ".join(bad_severity_rules)
+        )
     return payload
+
+
+def load_gate_config(path: Path) -> Dict[str, Any]:
+    """加载并校验 YAML 门禁配置（必须包含 thresholds 映射）。"""
+    import yaml
+
+    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return validate_gate_config(payload)
 
 
 def evaluate_gate(*, report: RegressionReport, config: Dict[str, Any]) -> TrajectoryGateResult:
     """按阈值评估候选版本，任一 block 级违规即 BLOCK。"""
     thresholds = config.get("thresholds", DEFAULT_THRESHOLDS)
+    severity_overrides = config.get("severity_overrides", {}) or {}
     violations: List[GateViolation] = []
 
     minimum_success_rate = thresholds.get("minimum_success_rate")
@@ -521,6 +586,13 @@ def evaluate_gate(*, report: RegressionReport, config: Dict[str, Any]) -> Trajec
         threshold = thresholds.get(rule)
         if threshold is not None and actual > threshold:
             violations.append(GateViolation(rule, severity, actual, threshold, message))
+
+    # 允许通过 severity_overrides 把任意规则的默认级别改成 block / warning
+    # （例如把 maximum_task_regressions 从默认 warning 提升为 block）
+    violations = [
+        replace(item, severity=severity_overrides.get(item.rule, item.severity))
+        for item in violations
+    ]
 
     status = (
         "BLOCK" if any(item.severity == "block" for item in violations)
@@ -658,22 +730,40 @@ def ledger_to_spans(
     EVO 的真实多角色 Agent 每次工具调用都会经 ledger.record_tool 留痕，
     本函数按记录顺序还原 tool span（含参数、成败、耗时与错误），并补 planner /
     final 两个边界 span，使真实 Agent 轨迹可以直接进入 evaluate_results。
+
+    计量口径（串行步骤求和，不重不漏）：第一次模型调用计入 planner span，其余
+    模型调用（worker / critic / 综合）合计计入 final span，工具调用各占一个 tool
+    span。因此 token / 成本总量等于全部模型调用之和，延迟总量等于全部 LLM 调用与
+    工具调用的耗时之和（串行口径下约等于任务墙钟时长）。
     """
     spans: List[Dict[str, Any]] = []
     model_log = ledger_summary.get("model_call_log") or []
     tool_log = ledger_summary.get("tool_call_log") or []
 
-    planner_tokens = int(model_log[0].get("input_tokens", 0)) if model_log else 0
-    planner_completion = int(model_log[0].get("output_tokens", 0)) if model_log else 0
-    planner_cost = float(model_log[0].get("cost_usd", 0.0)) if model_log else 0.0
+    def _model_usage(item: Dict[str, Any]) -> Tuple[int, int, float, int]:
+        return (
+            int(item.get("input_tokens", 0) or 0),
+            int(item.get("output_tokens", 0) or 0),
+            float(item.get("cost_usd", 0.0) or 0.0),
+            int(item.get("duration_ms", 0) or 0),
+        )
+
+    # planner span 承担第一次模型调用（Lead 规划）的 token / 成本 / 耗时。
+    clock_ms = 0
+    if model_log:
+        p_prompt, p_completion, p_cost, p_duration = _model_usage(model_log[0])
+    else:
+        p_prompt = p_completion = 0
+        p_cost = 0.0
+        p_duration = 0
     spans.append(TrajectorySpan(
         step=1, kind="planner", name="plan", input=planner_input, output=None,
-        start_time_ms=0, end_time_ms=0,
-        prompt_tokens=planner_tokens, completion_tokens=planner_completion,
-        cost_usd=planner_cost,
+        start_time_ms=clock_ms, end_time_ms=clock_ms + p_duration,
+        prompt_tokens=p_prompt, completion_tokens=p_completion, cost_usd=p_cost,
     ).to_dict())
+    clock_ms += p_duration
 
-    clock_ms = 0
+    # tool span 承担每次工具调用的耗时；工具本身不重复计 LLM token。
     for index, tool in enumerate(tool_log, start=2):
         duration = int(tool.get("duration_ms", 0) or 0)
         spans.append(TrajectorySpan(
@@ -685,14 +775,17 @@ def ledger_to_spans(
         ).to_dict())
         clock_ms += duration
 
-    final_prompt = sum(int(item.get("input_tokens", 0)) for item in model_log)
-    final_completion = sum(int(item.get("output_tokens", 0)) for item in model_log)
-    final_cost = round(sum(float(item.get("cost_usd", 0.0)) for item in model_log), 8)
+    # final span 承担"其余"模型调用（worker / critic / 综合）的合计。
+    # 切片 [1:] 是关键：第一次调用已计入 planner，不能再重复累加一次。
+    remaining_models = model_log[1:]
+    f_prompt = sum(int(item.get("input_tokens", 0) or 0) for item in remaining_models)
+    f_completion = sum(int(item.get("output_tokens", 0) or 0) for item in remaining_models)
+    f_cost = round(sum(float(item.get("cost_usd", 0.0) or 0.0) for item in remaining_models), 8)
+    f_duration = sum(int(item.get("duration_ms", 0) or 0) for item in remaining_models)
     spans.append(TrajectorySpan(
         step=len(spans) + 1, kind="final", name="final_answer", input=None, output=answer,
-        start_time_ms=clock_ms, end_time_ms=clock_ms,
-        prompt_tokens=final_prompt, completion_tokens=final_completion,
-        cost_usd=final_cost,
+        start_time_ms=clock_ms, end_time_ms=clock_ms + f_duration,
+        prompt_tokens=f_prompt, completion_tokens=f_completion, cost_usd=f_cost,
     ).to_dict())
     return {"answer": answer, "spans": spans}
 

@@ -13,6 +13,13 @@ thresholds:
   maximum_task_regressions: 0             # 普通任务回归条数上限
 
   # ---- 成本组 ----
-  maximum_average_latency_ms: 2000.0      # 单任务平均延迟上限（毫秒）
-  maximum_average_total_tokens: 20000     # 单任务平均 token 上限
-  maximum_average_cost_usd: 0.05          # 单任务平均成本上限（美元）
+  maximum_average_latency_ms: 2000.0      # 单任务平均延迟上限（毫秒，默认 block）
+  maximum_average_total_tokens: 20000     # 单任务平均 token 上限（默认 warning）
+  maximum_average_cost_usd: 0.05          # 单任务平均成本上限（美元，默认 warning）
+
+# 可选：覆盖任意规则的默认判定级别（block 阻断 / warning 仅提示）。
+# 规则默认级别：成功率、成功率跌幅、工具选择准确率、关键任务回归、平均延迟为 block；
+#              普通任务回归、平均 token、平均成本为 warning。
+# 例如要求“出现任意一条普通任务回归也阻断发布”，取消下面两行注释：
+# severity_overrides:
+#   maximum_task_regressions: block

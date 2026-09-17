@@ -15,11 +15,13 @@ from evoagent.trajectory import (
     build_demo_results,
     compare_results,
     evaluate_gate,
+    evaluate_results,
     evaluate_task,
     ledger_to_spans,
     load_results,
     locate_first_error,
     save_results,
+    validate_gate_config,
 )
 
 
@@ -92,6 +94,17 @@ class EvaluateTaskTests(unittest.TestCase):
         self.assertFalse(evaluation.has_correct_arguments)
         self.assertFalse(evaluation.is_success)
 
+    def test_extra_irrelevant_arguments_are_ignored(self):
+        # 期望只声明 target；实际入参额外携带 request_id / timestamp 等无关字段，
+        # 子集语义下应判通过，不应因整个 dict 不精确相等而误判。
+        task = self._task(["ast_analyze"])
+        result = make_result([
+            ("ast_analyze", {"target": "t1", "request_id": "abc-123", "ts": 1700000000}),
+        ], answer="ast ok")
+        evaluation = evaluate_task(task=task, result=result)
+        self.assertTrue(evaluation.has_correct_arguments)
+        self.assertTrue(evaluation.is_success)
+
     def test_missing_answer_keyword_fails_coverage(self):
         task = self._task(["ast_analyze"], answer_contains=("scanners",))
         result = make_result([("ast_analyze", {"target": "t1"})], answer="ast ok")
@@ -142,6 +155,17 @@ class CompareResultsTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             compare_results(
                 baseline_name="b", candidate_name="c", tasks=tasks,
+                baseline_results={}, candidate_results={}, dataset_name="unit",
+            )
+
+    def test_empty_task_set_raises_instead_of_division_by_zero(self):
+        with self.assertRaises(ValueError):
+            evaluate_results(
+                version_name="v", tasks=(), results_by_task_id={},
+            )
+        with self.assertRaises(ValueError):
+            compare_results(
+                baseline_name="b", candidate_name="c", tasks=(),
                 baseline_results={}, candidate_results={}, dataset_name="unit",
             )
 
@@ -244,6 +268,40 @@ class GateTests(unittest.TestCase):
         self.assertEqual("WARNING", gate.status)
         self.assertTrue(all(item.severity == "warning" for item in gate.violations))
 
+    def test_severity_override_can_block_normal_regressions(self):
+        # 默认普通回归只是 warning；通过 severity_overrides 提升为 block 后应 BLOCK
+        tasks, report = self._report_pair(build_demo_results("regression"))
+        config = {
+            "thresholds": {
+                "minimum_success_rate": 0.5,
+                "maximum_task_regressions": 1,
+            },
+            "severity_overrides": {"maximum_task_regressions": "block"},
+        }
+        gate = evaluate_gate(report=report, config=config)
+        self.assertEqual("BLOCK", gate.status)
+        rule = next(item for item in gate.violations
+                    if item.rule == "maximum_task_regressions")
+        self.assertEqual("block", rule.severity)
+
+    def test_unknown_threshold_key_is_rejected(self):
+        with self.assertRaises(ValueError):
+            validate_gate_config({"thresholds": {"minimum_success_rat": 0.9}})
+
+    def test_illegal_severity_override_value_is_rejected(self):
+        with self.assertRaises(ValueError):
+            validate_gate_config({
+                "thresholds": {"maximum_task_regressions": 0},
+                "severity_overrides": {"maximum_task_regressions": "BLOCK!"},
+            })
+
+    def test_legal_config_passes_validation(self):
+        config = validate_gate_config({
+            "thresholds": {"minimum_success_rate": 0.9},
+            "severity_overrides": {"maximum_task_regressions": "warning"},
+        })
+        self.assertIn("thresholds", config)
+
 
 class LedgerAdapterTests(unittest.TestCase):
     def test_ledger_tool_calls_become_tool_spans(self):
@@ -270,6 +328,36 @@ class LedgerAdapterTests(unittest.TestCase):
         kinds = [span["kind"] for span in result["spans"]]
         self.assertEqual(["planner", "tool", "tool", "final"], kinds)
         self.assertEqual("final text", result["answer"])
+
+    def test_tokens_and_latency_count_each_llm_call_once(self):
+        def model(prompt, completion, cost, duration_ms):
+            return {
+                "role": "lead", "provider": "openai", "model": "gpt",
+                "input_tokens": prompt, "output_tokens": completion,
+                "cost_usd": cost, "duration_ms": duration_ms,
+                "ok": True, "error": "",
+            }
+
+        ledger_summary = {
+            # 三次模型调用：第一次归 planner，其余归 final，不得重复计算第一次
+            "model_call_log": [
+                model(100, 20, 0.001, 50),
+                model(200, 30, 0.002, 70),
+                model(300, 40, 0.003, 90),
+            ],
+            "tool_call_log": [
+                {"role": "security", "tool": "ast_analyze", "arguments": {},
+                 "ok": True, "duration_ms": 12, "result_preview": "ok", "error": ""},
+            ],
+        }
+        result = ledger_to_spans(ledger_summary, answer="done")
+        metrics = aggregate_run_metrics(result["spans"])
+        # token / 成本 = 全部模型调用之和，第一次调用不被算两遍
+        self.assertEqual(600, metrics["prompt_tokens"])
+        self.assertEqual(90, metrics["completion_tokens"])
+        self.assertAlmostEqual(0.006, metrics["cost_usd"])
+        # 延迟 = 三次 LLM（50+70+90）+ 一次工具（12）= 222，LLM 耗时被纳入
+        self.assertEqual(222.0, metrics["duration_ms"])
 
     def test_aggregate_run_metrics_tolerates_empty(self):
         self.assertEqual(0, aggregate_run_metrics([])["total_tokens"])
