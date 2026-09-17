@@ -1,34 +1,36 @@
-# TrajectEvo · Agent 代码审查与自进化平台
+English | [**简体中文**](docs/README.zh-CN.md)
 
-> TrajectEvo（Trajectory + Evolution）：在多角色 Agent 代码审查与提示词自进化之上，提供 Agent 轨迹级回归评测、首错归因与 CI 发布门禁。
+# TrajectEvo · Agentic Code Review & Self-Evolution Platform
 
-- 审查统一 diff，输出结构化问题、修复建议和测试建议
-- GitHub `pull_request` webhook（`opened`、`reopened`、`synchronize`）
-- `agentic` 运行模式：Lead、Security、Correctness/Reliability、Critic 多 Agent 协作
-- SQLite 保存任务状态、执行轨迹和最终报告
-- JSON API 与 Markdown 报告
-- webhook HMAC-SHA256 签名校验，以及可选的 GitHub PR 评论回写
-- Web 管理台、任务 Dashboard 与 Prometheus 指标
-- 普通任务采用固定单轮多 Agent 协作（Lead 2 次、双 Worker 各 1 次、Critic 1 次，共 5 次 LLM 调用）；高风险任务最多允许一轮 Worker 返工
-- LLM unified patch、AST/CST、沙箱前后测试对比与仅 Draft PR 的修复闭环
-- PostgreSQL、Redis 生产模式
-- 失败案例回流、提示词评测、版本激活与回滚
-- 自研 Agent Runtime、持久化 checkpoint、执行预算与任务断点续跑
-- 带 Tool Registry、参数 Schema 校验和结构化 Observation 的 Agent Loop
-- 确认反馈的租户/仓库隔离记忆、检索与过期清理
-- Redis Streams ACK、Worker 租约、指数退避重试和死信队列
-- Webhook delivery 幂等、重放时间窗与评论 upsert
-- 用户登录、RBAC、租户/仓库隔离和不可变管理审计
-- 动态 Skill manifest 校验、签名校验和隔离进程沙箱
-- 自动修复后的编译/测试门禁、灰度发布与影子流量
-- OpenTelemetry Trace、Prometheus 指标和持久化告警
-- 轨迹级回归评测：对同一评测任务集双跑两个版本，识别“基线通过、候选失败”的回归任务，并按任务类别切片对比质量与成本
-- 首错归因：逐 step 对齐工具调用轨迹，定位第一处工具选择 / 参数 / 执行 / 生成分歧
-- YAML 发布门禁：输出 PASS / WARNING / BLOCK，BLOCK 以退出码 1 直接阻断 CI（见 `release-gate.yaml`）
+> TrajectEvo (Trajectory + Evolution) layers **agent trajectory-level regression evaluation, first-error attribution, and a CI release gate** on top of multi-agent code review and prompt self-evolution.
 
-## 快速开始
+- Reviews unified diffs and emits structured findings, fix suggestions, and test recommendations
+- GitHub `pull_request` webhook (`opened`, `reopened`, `synchronize`)
+- `agentic` mode: collaborative Lead, Security, Correctness/Reliability, and Critic agents
+- SQLite persistence for task state, execution traces, and final reports
+- JSON API and Markdown reports
+- HMAC-SHA256 webhook signature verification and optional GitHub PR comment write-back
+- Web console, task dashboard, and Prometheus metrics
+- Fixed single-round multi-agent collaboration for normal tasks (2 Lead calls, 1 per worker, 1 Critic — 5 LLM calls total); high-risk tasks allow at most one worker rework round
+- Closed-loop auto-fix via LLM unified patch, AST/CST transforms, sandboxed before/after test comparison, and Draft-PR-only delivery
+- PostgreSQL and Redis for production deployments
+- Failure-case feedback loop, prompt evaluation, and version activation/rollback
+- Self-built agent runtime with persistent checkpoints, execution budgets, and task resume
+- Agent Loop with a Tool Registry, parameter Schema validation, and structured Observations
+- Tenant/repository-isolated memory backed by confirmed feedback, with retrieval and expiry cleanup
+- Redis Streams ACK, worker leases, exponential-backoff retries, and a dead-letter queue
+- Idempotent webhook delivery, replay time window, and comment upsert
+- User login, RBAC, tenant/repository isolation, and an immutable admin audit log
+- Dynamic Skill manifest validation, signature verification, and isolated process sandboxing
+- Post-fix compile/test gating, canary rollout, and shadow traffic
+- OpenTelemetry traces, Prometheus metrics, and persistent alerts
+- **Trajectory-level regression**: runs two versions against the same task set, flags tasks that "passed on baseline but fail on candidate", and slices quality/cost by task category
+- **First-error attribution**: aligns tool-call traces step by step to pinpoint the first tool-selection / argument / execution / generation divergence
+- **YAML release gate**: emits PASS / WARNING / BLOCK; BLOCK exits with code 1 to stop CI directly (see `release-gate.yaml`)
 
-项目使用 Python 3.11。先安装锁定范围内的运行依赖，并在同一个 PowerShell 窗口中配置本地管理员：
+## Quick Start
+
+The project targets Python 3.11. Install the pinned runtime dependencies and configure a local administrator in the same PowerShell window:
 
 ```powershell
 python -m pip install -r requirements.txt
@@ -38,23 +40,23 @@ $bytes = New-Object byte[] 32
 $env:EVOAGENT_AUTH_REQUIRED = 'true'
 $env:EVOAGENT_AUTH_SECRET = [Convert]::ToBase64String($bytes)
 $env:EVOAGENT_BOOTSTRAP_ADMIN_USERNAME = 'admin'
-$env:EVOAGENT_BOOTSTRAP_ADMIN_PASSWORD = '<替换为至少 10 个字符的密码>'
+$env:EVOAGENT_BOOTSTRAP_ADMIN_PASSWORD = '<replace with a password of at least 10 characters>'
 
 python -m evoagent
 ```
 
-不要直接使用示例占位符作为密码或密钥。环境变量只对当前 PowerShell 及其子进程生效；修改配置后需要停止并重新启动 EvoAgent。服务可以在未配置模型时启动并提供健康检查，但提交审查前必须按下方“模型配置”章节配置模型。
+Do not use the sample placeholders as real passwords or secrets. Environment variables only apply to the current PowerShell window and its child processes; after changing configuration, stop and restart EvoAgent. The service can start and serve health checks without a configured model, but a model must be configured (see [Model Configuration](#model-configuration)) before submitting reviews.
 
-Bootstrap 管理员只在用户名尚不存在时创建；已有同名用户的密码不会在重启时被覆盖。
+The bootstrap administrator is created only when the username does not already exist; restarting will not overwrite the password of an existing admin user.
 
-服务默认监听 `127.0.0.1:8080`。启动后打开 `http://127.0.0.1:8080/`，前端会在业务 API 返回未授权状态后显示登录层。登录状态保存在当前浏览器的 `localStorage` 中；需要重新登录时可以点击退出，或清除站点数据。
+The service listens on `127.0.0.1:8080` by default. After startup, open `http://127.0.0.1:8080/`; the frontend shows a login layer once a business API returns unauthorized. Login state is kept in the browser's `localStorage`; to log in again, sign out or clear site data.
 
-API 调用需要先登录并携带 Bearer Token：
+API calls require a login and a Bearer token:
 
 ```powershell
 $session = Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8080/v1/auth/login `
   -ContentType 'application/json' `
-  -Body (@{username='admin'; password='<你的密码>'} | ConvertTo-Json)
+  -Body (@{username='admin'; password='<your-password>'} | ConvertTo-Json)
 $headers = @{Authorization="Bearer $($session.access_token)"}
 Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8080/v1/reviews `
   -Headers $headers `
@@ -67,44 +69,44 @@ Invoke-RestMethod -Method Post -Uri http://127.0.0.1:8080/v1/reviews `
   } | ConvertTo-Json)
 ```
 
-查询任务：
+Query a task:
 
 ```powershell
 Invoke-RestMethod -Headers $headers http://127.0.0.1:8080/v1/tasks/<task-id>
 Invoke-WebRequest -Headers $headers http://127.0.0.1:8080/v1/tasks/<task-id>/report
 ```
 
-运行测试：
+Run the tests:
 
 ```powershell
 python -m unittest discover -s tests -v
 ```
 
-## 轨迹级回归与发布门禁
+## Trajectory-Level Regression & Release Gate
 
-`evoagent/trajectory.py` 在与具体 Agent 实现解耦的标准化轨迹（`TrajectorySpan` 列表）上做版本回归：任务三断言（工具链 / 参数 / 答案）、版本指标对比、首错归因和 YAML 门禁。
+`evoagent/trajectory.py` performs version regression over standardized trajectories (lists of `TrajectorySpan`) that are decoupled from any concrete agent implementation: three per-task assertions (tool chain / arguments / answer), version metric comparison, first-error attribution, and a YAML gate.
 
-无需 API Key 的离线演示（内置代码审查场景夹具，baseline 全过、regression 被 BLOCK、fixed 全过）：
+An offline demo with no API key required (built-in code-review fixtures: baseline fully passes, regression is BLOCKed, fixed fully passes):
 
 ```powershell
 python -m evoagent.trajectory demo
 ```
 
-真实使用时，先把两个版本各自跑出的轨迹结果存成 JSON（key 为任务 id），再离线对比与门禁评估：
+For real usage, persist the trajectory results produced by each of the two versions as JSON (keyed by task id), then run the offline comparison and gate:
 
 ```powershell
-# 对比两个版本，输出 Markdown 回归报告（--format json 可输出结构化结果）
+# Compare two versions and emit a Markdown regression report (--format json for structured output)
 python -m evoagent.trajectory compare --baseline trajectory_examples/baseline.json --candidate trajectory_examples/regression.json
 
-# 按 release-gate.yaml 阈值评估发布门禁；BLOCK 时进程退出码为 1，可直接接入 CI
+# Evaluate the release gate against release-gate.yaml thresholds; BLOCK exits with code 1 and can be wired into CI directly
 python -m evoagent.trajectory gate --baseline trajectory_examples/baseline.json --candidate trajectory_examples/regression.json --config release-gate.yaml
 ```
 
-真实多角色 Agent 的轨迹由 `ledger_to_spans(ExecutionLedger.summary())` 适配而来：每次工具调用的入参、成败、耗时与错误都会还原成标准 tool span，因此门禁评测对象是真实 Agent，而不是规则模拟器。示例结果文件见 `trajectory_examples/`。
+The trajectories of the real multi-agent system are adapted via `ledger_to_spans(ExecutionLedger.summary())`: every tool call's arguments, success/failure, latency, and error are reconstructed into a standard tool span, so the gate evaluates the **real agent rather than a rule-based simulator**. Sample result files are in `trajectory_examples/`.
 
-## 模型配置
+## Model Configuration
 
-DeepSeek 官方 API（按 Token 计费）：
+Official DeepSeek API (billed per token):
 
 ```powershell
 $env:EVOAGENT_LLM_PROVIDER = 'deepseek'
@@ -112,7 +114,7 @@ $env:EVOAGENT_DEEPSEEK_API_KEY = '<deepseek-api-key>'
 python -m evoagent
 ```
 
-通过 OpenRouter 使用有速率限制、可用性可能变化的 DeepSeek 免费模型：
+Use the rate-limited, availability-varying free DeepSeek model through OpenRouter:
 
 ```powershell
 $env:EVOAGENT_LLM_PROVIDER = 'openrouter-deepseek-free'
@@ -120,9 +122,9 @@ $env:EVOAGENT_OPENROUTER_API_KEY = '<openrouter-api-key>'
 python -m evoagent
 ```
 
-如果指定的免费 DeepSeek 版本下线，可将 `EVOAGENT_LLM_MODEL` 改为 OpenRouter 当前提供的其他 `:free` 模型，或把 Provider 改为 `openrouter-free` 让免费路由自动选择可用模型。
+If the designated free DeepSeek model is retired, either change `EVOAGENT_LLM_MODEL` to another current `:free` model on OpenRouter, or set the provider to `openrouter-free` to let free routing pick an available model automatically.
 
-任意其他 OpenAI Chat Completions 兼容端点使用 `custom`：
+For any other OpenAI Chat Completions-compatible endpoint, use `custom`:
 
 ```powershell
 $env:EVOAGENT_LLM_PROVIDER = 'custom'
@@ -131,149 +133,149 @@ $env:EVOAGENT_LLM_API_KEY = '<token>'
 $env:EVOAGENT_LLM_MODEL = '<model-name>'
 ```
 
-密钥只通过环境变量读取，不要提交到仓库。
+Secrets are read only from environment variables; never commit them to the repository.
 
-项目启动时会自动读取项目根目录的 `.env`，也兼容 `evoagent/.env`；系统环境变量优先于 `.env` 文件。推荐将以下内容写入根目录 `.env`（该文件已被 `.gitignore` 忽略）：
+On startup the project auto-loads `.env` from the project root and also supports `evoagent/.env`; system environment variables take precedence over `.env`. A recommended root `.env` (already ignored by `.gitignore`):
 
 ```env
 EVOAGENT_LLM_PROVIDER=deepseek
-EVOAGENT_DEEPSEEK_API_KEY=你的真实APIKey
+EVOAGENT_DEEPSEEK_API_KEY=your-real-api-key
 ```
 
 ## GitHub Webhook
 
-项目使用“GitHub 仓库 Webhook + 公网转发 + fine-grained PAT”接收 PR 事件，不需要创建或安装 GitHub App：
+The project receives PR events through "GitHub repository webhook + public tunnel + fine-grained PAT"; creating or installing a GitHub App is not required:
 
 ```text
-GitHub Pull request 事件
+GitHub pull_request event
         │
         ▼
-https://<公网域名>/webhooks/github
-        │  公网转发
+https://<public-domain>/webhooks/github
+        │  public tunnel
         ▼
 http://127.0.0.1:8080/webhooks/github
         │
         ▼
-EvoAgent 创建异步审查任务
+EvoAgent creates an asynchronous review task
 ```
 
-### 1. 配置 EvoAgent
+### 1. Configure EvoAgent
 
-先生成一个 Webhook Secret，并根据需要配置 GitHub fine-grained personal access token：
+Generate a webhook secret and, if needed, configure a GitHub fine-grained personal access token:
 
 ```powershell
 $webhookBytes = New-Object byte[] 32
 [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($webhookBytes)
 $env:EVOAGENT_GITHUB_WEBHOOK_SECRET = [Convert]::ToBase64String($webhookBytes)
 
-# 私有仓库、PR 评论回写或自动修复需要；只审查公开仓库且不回写时可以不配置。
+# Required for private repos, PR comment write-back, or auto-fix; optional when reviewing public repos without write-back.
 $env:EVOAGENT_GITHUB_TOKEN = '<GitHub fine-grained PAT>'
 
-# 默认关闭。设为 true 后，审查完成时更新或创建 PR 评论。
+# Disabled by default. When true, update or create a PR comment after the review completes.
 $env:EVOAGENT_AUTO_POST_REVIEW = 'true'
 
 python -m evoagent
 ```
 
-Webhook Secret 用于验证 GitHub 请求头中的 HMAC-SHA256 签名，不能与登录用的 `EVOAGENT_AUTH_SECRET` 混用。Webhook 请求不携带管理台 Bearer Token；`/webhooks/github` 使用签名而不是用户登录进行认证。
+The webhook secret verifies the HMAC-SHA256 signature in the GitHub request header and must not be reused as the login `EVOAGENT_AUTH_SECRET`. Webhook requests carry no console Bearer token; `/webhooks/github` authenticates via signature rather than user login.
 
-fine-grained PAT 只授权需要接入的仓库，并按功能授予最小权限：
+Grant the fine-grained PAT access only to the repositories you integrate with, with least-privilege permissions per feature:
 
-- 读取私有仓库 PR Diff：`Contents: Read`、`Pull requests: Read`；
-- 回写审查评论：`Pull requests: Read and write`；
-- 创建自动修复分支和提交：`Contents: Read and write`、`Pull requests: Read and write`。
+- Read private-repo PR diffs: `Contents: Read`, `Pull requests: Read`;
+- Write review comments: `Pull requests: Read and write`;
+- Create auto-fix branches and commits: `Contents: Read and write`, `Pull requests: Read and write`.
 
-只接收 Webhook 但不访问私有仓库、不回写评论且不执行自动修复时，可以不设置 PAT。密钥必须在启动 EvoAgent 前设置，修改后需要重启服务。
+When you only receive webhooks for public repos without comment write-back or auto-fix, no PAT is required. Secrets must be set before starting EvoAgent, and the service must be restarted after changing them.
 
-### 2. 建立公网转发
+### 2. Establish a Public Tunnel
 
-GitHub 无法访问 `127.0.0.1`，需要把公网 HTTPS 地址转发到本地 `http://127.0.0.1:8080`。任选一种已安装的转发工具，例如：
+GitHub cannot reach `127.0.0.1`, so forward a public HTTPS URL to local `http://127.0.0.1:8080`. Use any installed tunnel tool, for example:
 
 ```powershell
 # Cloudflare Quick Tunnel
 cloudflared tunnel --url http://127.0.0.1:8080
 
-# 或 ngrok
+# or ngrok
 ngrok http 8080
 ```
 
-命令启动后会显示一个形如 `https://example.trycloudflare.com` 或 `https://example.ngrok-free.app` 的公网 HTTPS 地址。保持 EvoAgent 和转发进程同时运行。临时公网地址通常会在转发工具重启后变化，变化后必须同步更新 GitHub Webhook 的 Payload URL。
+The command prints a public HTTPS URL such as `https://example.trycloudflare.com` or `https://example.ngrok-free.app`. Keep both EvoAgent and the tunnel process running. Temporary public URLs usually change when the tunnel restarts; when that happens, update the GitHub webhook Payload URL accordingly.
 
-上述快捷转发会把 8080 端口上的管理台和 API 一并暴露到公网，因此必须保持 `EVOAGENT_AUTH_REQUIRED=true`，并使用强管理员密码和随机 `EVOAGENT_AUTH_SECRET`。长期部署建议通过反向代理只公开 `/webhooks/github`（以及按需公开 `/health`），不要向公网暴露整个管理台。
+These quick tunnels expose both the console and the API on port 8080 to the public internet, so you must keep `EVOAGENT_AUTH_REQUIRED=true` with a strong admin password and a random `EVOAGENT_AUTH_SECRET`. For long-term deployment, use a reverse proxy to expose only `/webhooks/github` (and optionally `/health`) rather than exposing the entire console.
 
-### 3. 在 GitHub 仓库中添加 Webhook
+### 3. Add the Webhook in the GitHub Repository
 
-进入目标仓库的 **Settings → Webhooks → Add webhook**，填写：
+In the target repository, go to **Settings → Webhooks → Add webhook** and fill in:
 
-- **Payload URL**：`https://<公网域名>/webhooks/github`；
-- **Content type**：`application/json`；
-- **Secret**：与 `EVOAGENT_GITHUB_WEBHOOK_SECRET` 完全相同；
-- **SSL verification**：保持启用；
-- **Which events would you like to trigger this webhook?**：选择 **Let me select individual events**，只勾选 **Pull requests**；
-- **Active**：保持勾选。
+- **Payload URL**: `https://<public-domain>/webhooks/github`;
+- **Content type**: `application/json`;
+- **Secret**: exactly the same value as `EVOAGENT_GITHUB_WEBHOOK_SECRET`;
+- **SSL verification**: keep enabled;
+- **Which events would you like to trigger this webhook?**: choose **Let me select individual events** and check only **Pull requests**;
+- **Active**: keep checked.
 
-EvoAgent 会处理 `opened`、`reopened` 和 `synchronize` 三种 PR 动作；其他 `pull_request` 动作会正常接收但被忽略。服务会根据 payload 中的 `diff_url` 下载 Diff，并异步创建审查任务。
+EvoAgent handles the `opened`, `reopened`, and `synchronize` PR actions; other `pull_request` actions are accepted but ignored. The service downloads the diff from the payload's `diff_url` and creates an asynchronous review task.
 
-### 4. 验证连接
+### 4. Verify the Connection
 
-先确认本地服务和公网地址都能访问健康检查：
+First confirm both the local service and the public URL pass health checks:
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:8080/health
-Invoke-RestMethod https://<公网域名>/health
+Invoke-RestMethod https://<public-domain>/health
 ```
 
-然后新建 PR、重新打开 PR，或向 PR 推送一次提交。在 GitHub 的 **Settings → Webhooks → Recent Deliveries** 中应看到 `/webhooks/github` 返回 `202`；管理台的任务中心随后会出现对应审查任务。如果失败，优先检查公网转发进程是否仍在运行、Payload URL 是否包含 `/webhooks/github`、Secret 是否一致，以及 PAT 是否有目标仓库权限。
+Then open a new PR, reopen a PR, or push a commit to a PR. In GitHub **Settings → Webhooks → Recent Deliveries** you should see `/webhooks/github` return `202`; the corresponding review task then appears in the console's task center. On failure, first check that the tunnel is still running, that the Payload URL contains `/webhooks/github`, that the secret matches, and that the PAT has permission on the target repository.
 
-默认只在管理台保存结果。只有 `EVOAGENT_AUTO_POST_REVIEW=true` 时才会向 PR 回写评论。
+Results are stored only in the console by default. PR comments are written back only when `EVOAGENT_AUTO_POST_REVIEW=true`.
 
-自动修复只覆盖可确定安全的规则，例如调试输出、`shell=True` 和硬编码 Python 凭据；结果始终提交到新的 `evoagent/fix-pr-*` 分支，不直接修改源分支。
+Auto-fix only covers rules that are deterministically safe, such as debug output, `shell=True`, and hardcoded Python credentials; results are always committed to a new `evoagent/fix-pr-*` branch and never modify the source branch directly.
 
 ## API
 
-| 方法 | 路径 | 说明 |
+| Method | Path | Description |
 |---|---|---|
-| `GET` | `/health` | 健康检查 |
-| `POST` | `/v1/auth/login` | 登录并获取租户绑定的短期 Bearer Token |
-| `POST` | `/v1/reviews` | 创建同步审查任务 |
-| `POST` | `/v1/reviews?async=true` | 创建异步审查任务 |
-| `GET` | `/v1/tasks/{id}` | 获取状态、轨迹和报告 |
-| `GET` | `/v1/tasks/{id}/report` | 获取 Markdown 报告 |
-| `GET` | `/v1/tasks/{id}/feedback` | 获取该已完成任务的反馈历史 |
-| `POST` | `/v1/tasks/{id}/fix` | 创建自动修复分支和提交 |
-| `POST` | `/v1/tasks/{id}/feedback` | 回流误报、漏报或坏修复 |
-| `POST` | `/v1/tasks/{id}/cancel` | 请求取消任务 |
-| `POST` | `/v1/tasks/{id}/resume` | 从最近 checkpoint 续跑任务 |
-| `POST` | `/webhooks/github` | 接收 GitHub PR webhook |
-| `POST` | `/v1/skills/reload` | 动态重新加载 Skill |
-| `POST` | `/v1/evolution/auto` | 从失败案例生成并评测提示词版本 |
-| `POST` | `/v1/evolution/propose` | 评测指定提示词候选版本 |
-| `GET/POST` | `/v1/evaluation/cases` | 查询或增加版本化评测样本 |
-| `GET` | `/v1/evolution/status` | 查询模型与评测门禁就绪状态 |
-| `GET` | `/v1/evolution/runs` | 查询持久化的新旧版本评测记录 |
-| `POST` | `/v1/skills/{name}/versions/{version}/activate` | 激活或回滚版本 |
-| `POST` | `/v1/skill-evolution/auto` | 从确认反馈生成、回放并门禁 Skill 候选 |
-| `POST` | `/v1/skill-evolution/propose` | 评测指定 Agent Skill `SKILL.md` artifact |
-| `GET` | `/v1/skill-evolution/status?skill_name={name}` | 查询 Skill 门禁与激活版本 |
-| `GET` | `/v1/skill-evolution/runs` | 查询 Skill 进化运行与指标 |
-| `GET` | `/v1/skill-evolution/{name}/versions` | 查询 Skill artifact 版本链 |
-| `POST` | `/v1/skill-evolution/{name}/versions/{version}/activate` | 激活或回滚 Skill artifact |
-| `GET` | `/metrics` | Prometheus 文本指标 |
-| `GET` | `/api/alerts` | 查询租户告警 |
-| `GET` | `/api/audit` | 查询租户审计日志 |
-| `GET` | `/api/queue/dead-letters` | 查询死信任务 |
-| `POST` | `/v1/queue/dead-letters/replay` | 重放死信任务 |
-| `GET/POST` | `/api/deployments/llm-review`、`/v1/deployments/llm-review` | 查询或配置灰度/影子发布 |
+| `GET` | `/health` | Health check |
+| `POST` | `/v1/auth/login` | Log in and obtain a short-lived tenant-bound Bearer token |
+| `POST` | `/v1/reviews` | Create a synchronous review task |
+| `POST` | `/v1/reviews?async=true` | Create an asynchronous review task |
+| `GET` | `/v1/tasks/{id}` | Get status, trace, and report |
+| `GET` | `/v1/tasks/{id}/report` | Get the Markdown report |
+| `GET` | `/v1/tasks/{id}/feedback` | Get feedback history for a completed task |
+| `POST` | `/v1/tasks/{id}/fix` | Create an auto-fix branch and commit |
+| `POST` | `/v1/tasks/{id}/feedback` | Feed back false positives, missed findings, or bad fixes |
+| `POST` | `/v1/tasks/{id}/cancel` | Request task cancellation |
+| `POST` | `/v1/tasks/{id}/resume` | Resume a task from its latest checkpoint |
+| `POST` | `/webhooks/github` | Receive GitHub PR webhooks |
+| `POST` | `/v1/skills/reload` | Dynamically reload Skills |
+| `POST` | `/v1/evolution/auto` | Generate and evaluate a prompt version from failure cases |
+| `POST` | `/v1/evolution/propose` | Evaluate a specified prompt candidate |
+| `GET/POST` | `/v1/evaluation/cases` | Query or add versioned evaluation samples |
+| `GET` | `/v1/evolution/status` | Query model and evaluation-gate readiness |
+| `GET` | `/v1/evolution/runs` | Query persisted old-vs-new version evaluation runs |
+| `POST` | `/v1/skills/{name}/versions/{version}/activate` | Activate or roll back a version |
+| `POST` | `/v1/skill-evolution/auto` | Generate, replay, and gate a Skill candidate from confirmed feedback |
+| `POST` | `/v1/skill-evolution/propose` | Evaluate a given agent Skill `SKILL.md` artifact |
+| `GET` | `/v1/skill-evolution/status?skill_name={name}` | Query Skill gate and active version |
+| `GET` | `/v1/skill-evolution/runs` | Query Skill evolution runs and metrics |
+| `GET` | `/v1/skill-evolution/{name}/versions` | Query the Skill artifact version chain |
+| `POST` | `/v1/skill-evolution/{name}/versions/{version}/activate` | Activate or roll back a Skill artifact |
+| `GET` | `/metrics` | Prometheus text metrics |
+| `GET` | `/api/alerts` | Query tenant alerts |
+| `GET` | `/api/audit` | Query tenant audit logs |
+| `GET` | `/api/queue/dead-letters` | Query dead-letter tasks |
+| `POST` | `/v1/queue/dead-letters/replay` | Replay a dead-letter task |
+| `GET/POST` | `/api/deployments/llm-review`, `/v1/deployments/llm-review` | Query or configure canary/shadow rollout |
 
-`POST /v1/reviews` 的 `diff` 最大默认 1 MiB；单任务默认最多 8 步、120 秒。可通过环境变量调整，详见 `.env.example`。
+The `diff` in `POST /v1/reviews` defaults to a 1 MiB maximum; a single task defaults to at most 8 steps and 120 seconds. These can be tuned via environment variables; see `.env.example`.
 
-## 架构
+## Architecture
 
 ```text
 HTTP / GitHub Webhook
         │
         ▼
- ReviewService ── TaskStore(SQLite / PostgreSQL)
+ ReviewService ── TaskStore (SQLite / PostgreSQL)
         │
         ▼
         ReviewHarness (EvoAgent Runtime / checkpoint / resume / budget / trace)
@@ -281,46 +283,46 @@ HTTP / GitHub Webhook
         ├── DiffParser
         ├── Redis Streams / ACK / lease / retry / DLQ
         └── Agentic Lead/Workers
-              ├── Lead：一次任务分配并判定风险；高风险时最多请求一轮返工；最终综合
-              ├── Security Worker：输入/权限/敏感数据/危险调用链
-              ├── Correctness/Reliability Worker：状态/异常/并发/资源/兼容性
-              ├── Critic Worker：一次性盲审、反例与证据挑战
-              └── Gates：格式、证据、置信度和发布门禁
+              ├── Lead: assigns the task once and judges risk; requests at most one rework round for high-risk tasks; final synthesis
+              ├── Security Worker: inputs / permissions / sensitive data / dangerous call chains
+              ├── Correctness/Reliability Worker: state / exceptions / concurrency / resources / compatibility
+              ├── Critic Worker: one-shot blind review, counterexamples, and evidence challenges
+              └── Gates: format, evidence, confidence, and release gates
 ```
 
-## Skills 的定位与编写方式
+## Skills: Purpose and Authoring
 
-`skills/` 下的目录是 Agent Skill 包，不是工具连接器目录。它们目前以审查领域为中心，是因为本项目的产品目标是代码审查；Skill 的职责是把某个领域的判断标准、调查步骤和输出约束注入模型，而不是自己执行 SQL、调用 GitHub 或创建网络连接。
+The directories under `skills/` are agent Skill packages, not tool-connector directories. They are currently centered on the review domain because the product goal of this project is code review. A Skill's job is to inject a domain's judgment criteria, investigation steps, and output constraints into the model — not to execute SQL, call GitHub, or open network connections itself.
 
-一个 Skill 包至少包含一个 `SKILL.md`：
+A Skill package contains at least one `SKILL.md`:
 
 ```text
 skills/<skill-name>/
-└── SKILL.md                 # YAML 元数据 + 完整运行指令
+└── SKILL.md                 # YAML metadata + full operating instructions
 ```
 
-`SKILL.md` 的 frontmatter 由运行时读取：
+The runtime reads the `SKILL.md` frontmatter:
 
-- `name`：必须与目录名一致，且只使用小写字母、数字和连字符；
-- `description`：只用于目录发现和路由，应该短而明确地说明何时启用；
-- `allowed-tools`：该 Skill 允许 worker 使用的工具名集合。它是权限声明，不会安装或连接工具；最终权限还会与角色权限取交集；
+- `name`: must match the directory name and use only lowercase letters, digits, and hyphens;
+- `description`: used only for directory discovery and routing; it should state concisely when to enable the Skill;
+- `allowed-tools`: the set of tool names the Skill permits a worker to use. It is a permission declaration and does not install or connect any tool; the effective permission is also intersected with the role's permissions.
 
-frontmatter 后的 Markdown 正文才是 Skill 的核心。正文会在 Lead 选中 Skill 后注入对应 worker 的上下文，因此应写成可执行的审查协议，而不是几条标签式提示词。推荐至少包含：任务边界、适用/不适用范围、逐步调查流程、边界条件清单、证据与严重性标准、误报排除规则、修复与验证要求，以及稳定的输出字段。
+The Markdown body after the frontmatter is the core of the Skill. It is injected into the relevant worker's context after the Lead selects the Skill, so it should be written as an executable review protocol rather than a few tag-style prompts. It is recommended to include at least: task boundaries, in/out-of-scope conditions, a step-by-step investigation flow, an edge-case checklist, evidence and severity criteria, false-positive exclusion rules, remediation and verification requirements, and stable output fields.
 
-Skill 可以附带文本资源（例如规范摘录、查询模板或测试清单）。运行时会把资源列入 Skill 包，并仅为已选中的 Skill 注册 `read_skill_resource`；资源不能通过路径穿越或符号链接逃逸出包目录。真正的工具连接由运行时的 `RepositoryToolSuite`、外部集成或插件提供，Skill 只声明“可以使用哪些已经存在的工具”。
+A Skill may attach text resources (such as spec excerpts, query templates, or checklists). The runtime includes resources in the Skill package and registers `read_skill_resource` only for selected Skills; resources cannot escape the package directory via path traversal or symlinks. Real tool connections are provided by the runtime's `RepositoryToolSuite`, external integrations, or plugins — a Skill only declares "which already-existing tools may be used".
 
-运行时流程如下：
+The runtime flow is:
 
 ```text
-磁盘扫描 SKILL.md
-        ↓ 只暴露 name/description 给 Lead
-Lead 选择相关 Skill
-        ↓ 注入 instructions，并收窄 allowed-tools
-Worker 使用仓库工具取证
+Scan SKILL.md files on disk
+        ↓ expose only name/description to the Lead
+Lead selects the relevant Skill
+        ↓ inject instructions and narrow allowed-tools
+Worker gathers evidence with repository tools
         ↓
-Finding gate 校验格式、证据、置信度和发布条件
+Finding gate validates format, evidence, confidence, and release conditions
 ```
 
-因此，把 Skill 内容直接硬编码到全局上下文并不能完全等价：那会让每个任务都携带全部领域规则，增加上下文长度和相互干扰；Skill 机制可以按任务选择、限制工具权限、热加载版本，并通过 `/v1/skill-evolution/*` 做候选评测、门禁和回滚。对于只有一两句、没有独立选择价值的规则，直接放在全局 prompt 更合适；只有当一组规则有清晰边界、需要按场景启用或需要独立演进时，才应该做成 Skill。
+Hardcoding Skill content into the global context is therefore not equivalent: doing so would make every task carry the full set of domain rules, increasing context length and cross-rule interference. The Skill mechanism enables per-task selection, tool-permission narrowing, hot-reloadable versions, and candidate evaluation/gating/rollback via `/v1/skill-evolution/*`. Rules that are only a sentence or two and have no independent selection value are better placed in the global prompt; only a group of rules with a clear boundary, scenario-based activation, or a need to evolve independently should become a Skill.
 
-本仓库的内置 Skill 已按上述结构补充了完整的 Mission、Review procedure、Checklist、Evidence/severity、Remediation/verification 和 Output contract。新增 Skill 时可复制其中一个目录，再根据领域替换这些章节，并用 `POST /v1/skills/reload` 让新任务加载最新版本。
+The built-in Skills in this repository already follow this structure with complete Mission, Review procedure, Checklist, Evidence/severity, Remediation/verification, and Output contract sections. To add a new Skill, copy one of the existing directories, replace those sections for the new domain, and call `POST /v1/skills/reload` so new tasks load the latest version.
