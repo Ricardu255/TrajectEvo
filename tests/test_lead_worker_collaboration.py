@@ -5,6 +5,7 @@ import unittest
 
 from evoagent.agentic_core import AgenticReviewer
 from evoagent.diff_parser import parse_unified_diff
+from evoagent.lead_session import LeadSession
 from evoagent.memory import MemoryManager
 from evoagent.models import Finding, Severity
 from evoagent.store import TaskStore
@@ -225,7 +226,7 @@ class ModelOutputParsingTests(unittest.TestCase):
             "required_evidence": "changed-line evidence",
             "skills": "security-review",
         }]
-        values = AgenticReviewer._normalize_delegations(
+        values = LeadSession.normalize_delegations(
             raw, ["security"], ["app.py"], {"security-review"}, ["security-review"],
         )
         self.assertEqual(["src/app.py"], values[0]["files"])
@@ -238,7 +239,7 @@ class ModelOutputParsingTests(unittest.TestCase):
             {"assignment_id": "sec-1", "worker": "security", "files": {"a": 1}},
             {"assignment_id": "sec-2", "worker": "security", "files": None},
         ]
-        values = AgenticReviewer._normalize_delegations(raw, ["security"], ["app.py"])
+        values = LeadSession.normalize_delegations(raw, ["security"], ["app.py"])
         self.assertEqual(["app.py"], values[0]["files"])
         self.assertEqual(["app.py"], values[1]["files"])
 
@@ -250,7 +251,7 @@ class ModelOutputParsingTests(unittest.TestCase):
             "required_evidence": ["changed-line evidence", "scanner output"],
             "skills": ["security-review"],
         }]
-        values = AgenticReviewer._normalize_delegations(
+        values = LeadSession.normalize_delegations(
             raw, ["security"], ["app.py"], {"security-review"}, [],
         )
         self.assertEqual(["src/app.py", "src/util.py"], values[0]["files"])
@@ -270,7 +271,7 @@ class ModelOutputParsingTests(unittest.TestCase):
             "required_evidence": "scanner output",
         }]
         assignments = [{"assignment_id": "sec-1", "worker": "security"}]
-        values = AgenticReviewer._normalize_revision_requests(raw, assignments)
+        values = LeadSession.normalize_revision_requests(raw, assignments)
         self.assertEqual(["scanner output"], values[0]["required_evidence"])
 
 

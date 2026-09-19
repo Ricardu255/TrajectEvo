@@ -106,7 +106,7 @@ def _candidate_edges(
             if _normalized_path(finding.path) != truth_path:
                 continue
             if truth_identity and canonical_identity(
-                finding.rule_id, getattr(finding, "cwe", "")
+                finding.rule_id, finding.cwe or ""
             ) != truth_identity:
                 continue
             if start <= finding.line <= end:
@@ -309,11 +309,7 @@ class EndToEndEvaluationHarness:
         }
         try:
             parsed = parse_unified_diff(case["diff"])
-            review_case = getattr(reviewer, "review_case", None)
-            findings = (
-                review_case(case, parsed)
-                if review_case else reviewer.review(case["diff"], parsed)
-            )
+            findings = reviewer.review_case(case, parsed)
             matches = one_to_one_match(expected, findings, self.line_tolerance)
             result["predicted"] = len(findings)
             result["tp"] = len(matches)
@@ -336,7 +332,7 @@ class EndToEndEvaluationHarness:
                     "path": finding.path,
                     "line": finding.line,
                     "cwe": canonical_identity(
-                        finding.rule_id, getattr(finding, "cwe", "")
+                        finding.rule_id, finding.cwe or ""
                     ),
                     "rule_id": finding.rule_id,
                     "expected_severity": truth["severity"],

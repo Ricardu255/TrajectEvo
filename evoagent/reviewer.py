@@ -19,6 +19,33 @@ class Reviewer(ABC):
     def review(self, diff: str, parsed: ParsedDiff) -> List[Finding]:
         raise NotImplementedError
 
+    def review_with_context(
+        self, task_id: str, diff: str, parsed: ParsedDiff,
+        repository: str = "", tenant_id: str = "default",
+    ) -> List[Finding]:
+        """Stateless reviewers run the same pass regardless of task context."""
+        return self.review(diff, parsed)
+
+    def review_case(self, case: Dict[str, Any], parsed: ParsedDiff) -> List[Finding]:
+        """Evaluate one labelled case; defaults to a plain review of its diff."""
+        return self.review(case["diff"], parsed)
+
+    def evaluation_execution(self) -> Dict[str, Any]:
+        """Cost/latency telemetry for offline evaluation; empty by default."""
+        return {}
+
+    def evaluation_collaboration(self) -> Dict[str, Any]:
+        """Collaboration telemetry for offline evaluation; empty by default."""
+        return {}
+
+    def evaluation_config(self) -> Dict[str, Any]:
+        """Arm configuration for offline evaluation; empty by default."""
+        return {}
+
+    def collaboration_summary(self, task_id: str) -> Dict[str, Any]:
+        """Extra collaboration telemetry; empty for stateless reviewers."""
+        return {}
+
 
 class LocalRuleReviewer(Reviewer):
     name = "local-rules"

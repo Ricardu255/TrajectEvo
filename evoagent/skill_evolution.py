@@ -106,6 +106,15 @@ class _ReplayTaskStore:
             "enabled_skills": [self.skill_name],
         }}
 
+    def save_checkpoint(
+        self, _task_id: str, _node: str, _state: dict,
+        _status: str = "completed", _attempt: int = 1, _error: str = "",
+    ) -> None:
+        return None
+
+    def load_checkpoints(self, _task_id: str) -> dict:
+        return {}
+
 
 class AgentSkillReplayReviewer(Reviewer):
     """Replay a candidate through the product Lead/worker Skill runtime."""

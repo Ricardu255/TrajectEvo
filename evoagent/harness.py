@@ -129,13 +129,9 @@ class ReviewHarness:
         self._transition(
             TaskState.EXECUTING, "Reviewing %d changed files" % len(parsed.files)
         )
-        contextual = getattr(self.reviewer, "review_with_context", None)
-        findings = (
-            contextual(
-                state["task_id"], state["diff"], parsed,
-                repository=state["repository"], tenant_id=state.get("tenant_id", "default"),
-            )
-            if contextual else self.reviewer.review(state["diff"], parsed)
+        findings = self.reviewer.review_with_context(
+            state["task_id"], state["diff"], parsed,
+            repository=state["repository"], tenant_id=state.get("tenant_id", "default"),
         )
         return {"findings": [item.to_dict() for item in findings]}
 
@@ -146,8 +142,7 @@ class ReviewHarness:
             TaskState.REVIEWING, "Validating and ranking %d findings" % len(findings)
         )
         risk = self._risk(findings)
-        summary_reader = getattr(self.reviewer, "collaboration_summary", None)
-        reviewer_summary = summary_reader(state["task_id"]) if summary_reader else {}
+        reviewer_summary = self.reviewer.collaboration_summary(state["task_id"])
         if reviewer_summary and "run_mode" in reviewer_summary:
             collaboration = dict(reviewer_summary.get("collaboration") or {})
             run_mode = dict(reviewer_summary.get("run_mode") or {})

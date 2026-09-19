@@ -5,7 +5,7 @@ import unittest
 
 from evoagent.auth import AuthManager
 from evoagent.harness import ReviewHarness
-from evoagent.reviewer import LocalRuleReviewer
+from evoagent.reviewer import LocalRuleReviewer, Reviewer
 from evoagent.rollout import ReleaseManager
 from evoagent.service import ReviewService
 from evoagent.store import TaskStore
@@ -56,7 +56,7 @@ class ProductionFeatureTests(unittest.TestCase):
         self.assertEqual(["a"], [item["task_id"] for item in cases])
 
     def test_failed_graph_resumes_after_last_completed_checkpoint(self):
-        class BrokenReviewer:
+        class BrokenReviewer(Reviewer):
             name = "broken"
 
             def review(self, _diff, _parsed):

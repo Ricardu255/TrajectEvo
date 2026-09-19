@@ -68,7 +68,7 @@ class RegressionEvaluator:
 
     def run(self, prompt: str, cases: List[dict]) -> Dict[str, Any]:
         reviewer = self.reviewer_factory(prompt)
-        reviewer_name = str(getattr(reviewer, "name", reviewer.__class__.__name__))
+        reviewer_name = str(reviewer.name)
         true_positive = false_positive = false_negative = 0
         severity_hits = matched = clean_hits = clean_total = 0
         high_severity_hits = high_severity_total = 0

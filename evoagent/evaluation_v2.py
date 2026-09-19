@@ -121,13 +121,26 @@ def validate_real_dataset(cases: List[dict], minimum_cases: int = 300) -> Dict[s
 
 
 class _EvaluationTaskStore:
-    """Minimal task input provider used by AgenticReviewer during replay."""
+    """Minimal store used by AgenticReviewer during replay.
+
+    Implements the ``ReviewStore`` surface; checkpoints are intentionally
+    discarded because every replay case starts from a fresh session.
+    """
 
     def __init__(self, task_input: dict):
         self.task_input = dict(task_input)
 
     def get(self, _task_id: str, _tenant_id: Optional[str] = None) -> dict:
         return {"input": dict(self.task_input)}
+
+    def save_checkpoint(
+        self, _task_id: str, _node: str, _state: dict,
+        _status: str = "completed", _attempt: int = 1, _error: str = "",
+    ) -> None:
+        return None
+
+    def load_checkpoints(self, _task_id: str) -> dict:
+        return {}
 
 
 class SingleModelReviewer(Reviewer):
@@ -443,11 +456,7 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
                 return self.findings
 
             def review_case(self, case, parsed):
-                method = getattr(self.delegate, "review_case", None)
-                self.findings = (
-                    method(case, parsed)
-                    if method else self.delegate.review(case["diff"], parsed)
-                )
+                self.findings = self.delegate.review_case(case, parsed)
                 return self.findings
 
         recording = RecordingReviewer(reviewer)
@@ -486,39 +495,35 @@ class ProductionEvaluationHarness(EndToEndEvaluationHarness):
                 result["evidence_hits"] += int(bool(
                     finding.evidence_refs or finding.call_chain or finding.evidence.strip()
                 ))
-            summary_reader = getattr(reviewer, "evaluation_execution", None)
-            if summary_reader:
-                execution = summary_reader() or {}
-                result["cost_usd"] = float(execution.get("cost_usd", 0) or 0)
-                result["latency_ms"] = int(execution.get("duration_ms", result["latency_ms"]))
-                result["llm_calls"] = int(execution.get("llm_calls", 0) or 0)
-                result["input_tokens"] = int(execution.get("input_tokens", 0) or 0)
-                result["output_tokens"] = int(execution.get("output_tokens", 0) or 0)
-                result["total_tokens"] = int(execution.get("total_tokens", 0) or 0)
-                result["model_roles"] = dict(Counter(
-                    str(item.get("role"))
-                    for item in execution.get("model_call_log") or []
-                ))
-            collaboration_reader = getattr(reviewer, "evaluation_collaboration", None)
-            if collaboration_reader:
-                collaboration = collaboration_reader() or {}
-                decisions = (
-                    list(collaboration.get("critic_decisions") or [])
-                    if "critic" in set(collaboration.get("roles") or []) else []
-                )
-                result["critic_accepted"] = sum(
-                    bool(item.get("accepted")) for item in decisions
-                )
-                result["critic_rejected"] = sum(
-                    not bool(item.get("accepted")) for item in decisions
-                )
-                result["revision_requests"] = sum(
-                    len(item.get("revision_requests") or [])
-                    for item in (collaboration.get("lead") or {}).get("assessments") or []
-                )
-                result["revision_results"] = len(
-                    collaboration.get("revision_results") or []
-                )
+            execution = reviewer.evaluation_execution() or {}
+            result["cost_usd"] = float(execution.get("cost_usd", 0) or 0)
+            result["latency_ms"] = int(execution.get("duration_ms", result["latency_ms"]))
+            result["llm_calls"] = int(execution.get("llm_calls", 0) or 0)
+            result["input_tokens"] = int(execution.get("input_tokens", 0) or 0)
+            result["output_tokens"] = int(execution.get("output_tokens", 0) or 0)
+            result["total_tokens"] = int(execution.get("total_tokens", 0) or 0)
+            result["model_roles"] = dict(Counter(
+                str(item.get("role"))
+                for item in execution.get("model_call_log") or []
+            ))
+            collaboration = reviewer.evaluation_collaboration() or {}
+            decisions = (
+                list(collaboration.get("critic_decisions") or [])
+                if "critic" in set(collaboration.get("roles") or []) else []
+            )
+            result["critic_accepted"] = sum(
+                bool(item.get("accepted")) for item in decisions
+            )
+            result["critic_rejected"] = sum(
+                not bool(item.get("accepted")) for item in decisions
+            )
+            result["revision_requests"] = sum(
+                len(item.get("revision_requests") or [])
+                for item in (collaboration.get("lead") or {}).get("assessments") or []
+            )
+            result["revision_results"] = len(
+                collaboration.get("revision_results") or []
+            )
         return result
 
     @staticmethod
@@ -718,11 +723,13 @@ class FairAblationSuite:
         for name in self.arm_order:
             reviewer = self.factories[name](self.model, self.token_budget)
             arms[name] = harness.run(reviewer, cases, name)
-            config_reader = getattr(reviewer, "evaluation_config", None)
+            engine = (
+                reviewer.agentic if isinstance(reviewer, ProductArmReviewer) else reviewer
+            )
             arms[name]["fairness"] = {
                 "model": self.model, "token_budget_per_pr": self.token_budget,
-                "product_runtime": type(getattr(reviewer, "agentic", reviewer)).__name__,
-                "configuration": config_reader() if config_reader else {},
+                "product_runtime": type(engine).__name__,
+                "configuration": reviewer.evaluation_config(),
             }
             arms[name]["execution"] = {
                 "model_role_calls": self._role_totals(arms[name]["case_results"]),

@@ -349,13 +349,8 @@ class SkillEvolutionExperimentSuite:
             ]
             try:
                 parsed = parse_unified_diff(case["diff"])
-                review_case = getattr(reviewer, "review_case", None)
-                findings = (
-                    review_case(case, parsed)
-                    if review_case else reviewer.review(case["diff"], parsed)
-                )
-                execution_reader = getattr(reviewer, "evaluation_execution", None)
-                execution = execution_reader() if execution_reader else {}
+                findings = reviewer.review_case(case, parsed)
+                execution = reviewer.evaluation_execution() or {}
                 for name in (
                     "llm_calls", "input_tokens", "output_tokens",
                     "total_tokens", "duration_ms",

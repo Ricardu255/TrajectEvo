@@ -93,6 +93,8 @@ class AdvancedFeatureTests(unittest.TestCase):
         )
 
         class PromptAwareReviewer:
+            name = "prompt-aware"
+
             def __init__(self, prompt):
                 self.prompt = prompt
 
@@ -145,6 +147,8 @@ class AdvancedFeatureTests(unittest.TestCase):
         }
 
         class BrokenReviewer:
+            name = "broken"
+
             def review(self, _diff, _parsed):
                 raise RuntimeError("provider unavailable")
 
@@ -169,6 +173,8 @@ class AdvancedFeatureTests(unittest.TestCase):
         }
 
         class WrongRuleReviewer:
+            name = "wrong-rule"
+
             def review(self, _diff, parsed):
                 line = parsed.added_lines[0]
                 return [Finding(
@@ -196,6 +202,8 @@ class AdvancedFeatureTests(unittest.TestCase):
         )
 
         class HoldoutAwareReviewer:
+            name = "holdout-aware"
+
             def __init__(self, prompt):
                 self.prompt = prompt
 

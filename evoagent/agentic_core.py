@@ -14,12 +14,14 @@ from .diff_parser import ParsedDiff
 from .context_manager import ContextManager
 from .gates import FindingGate
 from .finding_identity import canonical_identity
+from .lead_session import LeadSession
 from .llm import JsonChatClient
 from .models import ComponentKind, Finding, Severity
 from .modes import component, resolve_mode
 from .repository_tools import RepositoryToolSuite
 from .reviewer import LocalRuleReviewer, Reviewer
 from .runtime import AgentTool, RuntimeBudgetExceeded, ToolRegistry
+from .store_contract import ReviewStore
 from .telemetry import ExecutionLedger
 
 
@@ -29,6 +31,7 @@ MIN_OUTPUT_TOKENS = 768
 # Task summaries keep full model-call logs; bound them or a long-running
 # service accumulates every review in memory.
 MAX_TRACKED_SUMMARIES = 128
+SUMMARY_CHECKPOINT = "agentic-summary"
 
 
 LEAD_PROMPT = """You are the Lead Agent for a hierarchical code review. You own decomposition,
@@ -122,15 +125,6 @@ def _strict_bool(value) -> bool:
     if isinstance(value, str):
         return value.strip().lower() in {"true", "yes", "1"}
     return bool(value)
-
-
-def _string_list(value) -> List[str]:
-    """Coerce a model-provided array field; a bare string is one element, not a character sequence."""
-    if isinstance(value, str):
-        return [value]
-    if isinstance(value, (list, tuple)):
-        return [str(item) for item in value]
-    return []
 
 
 class BoundedRole:
@@ -291,7 +285,7 @@ class AgenticReviewer(Reviewer):
     name = "agentic-reviewer"
 
     def __init__(
-        self, store, llm_client: Optional[JsonChatClient],
+        self, store: Optional[ReviewStore], llm_client: Optional[JsonChatClient],
         default_token_budget: int = 8000, default_time_budget: int = 60,
         input_cost_per_million: float = 0.0, output_cost_per_million: float = 0.0,
         enabled_roles: Optional[Set[str]] = None,
@@ -446,9 +440,10 @@ class AgenticReviewer(Reviewer):
             "context_management": context_management,
         }
         self._remember_summary(task_id, summary)
-        saver = getattr(self.store, "save_checkpoint", None)
-        if task_id and saver:
-            saver(task_id, "agentic-summary", summary, "completed", 1)
+        if task_id:
+            self.store.save_checkpoint(
+                task_id, SUMMARY_CHECKPOINT, summary, "completed", 1
+            )
         return gated.accepted
 
     def _remember_summary(self, task_id: str, summary: dict) -> None:
@@ -463,9 +458,11 @@ class AgenticReviewer(Reviewer):
             summary = self._summaries.get(task_id)
         if summary:
             return dict(summary)
-        loader = getattr(self.store, "load_checkpoints", None)
-        if loader and task_id:
-            checkpoint = (loader(task_id) or {}).get("agentic-summary") or {}
+        if task_id:
+            checkpoint = (
+                (self.store.load_checkpoints(task_id) or {}).get(SUMMARY_CHECKPOINT)
+                or {}
+            )
             if checkpoint.get("status") == "completed":
                 return dict(checkpoint.get("state") or {})
         return {}
@@ -526,37 +523,26 @@ class AgenticReviewer(Reviewer):
             name for name in ("security", "correctness-reliability")
             if name in enabled
         ]
-        session = self._load_lead_session(task_id, ledger)
+        session = LeadSession.load(self.store, task_id, ledger, self.context_manager)
         memory_context = memory_context or {
             "trust": "untrusted historical hints; verify with current diff or tools",
             "items": [],
         }
         available_skills = dict(available_skills or {})
         requested_skills = list(requested_skills or [])
-        if not session:
-            session = {
-                "protocol": "lead-workers-v3", "phase": "created",
-                "scanner_complete": False, "scanner_findings": [],
-                "scanner_components": [],
-                "delegations": [], "worker_results": {},
-                "lead_assessments": [], "revision_results": {},
-                "critic_decisions": [], "lead_final": {},
-                "accepted_findings": [], "risk_level": "normal",
-                "revision_rounds": 0,
-            }
 
-        if not session.get("scanner_complete"):
+        if not session.scanner_complete:
             rule_findings, _, scanner_components = self._scan(
                 diff, parsed, ledger, scanners,
             )
-            session["scanner_findings"] = [item.to_dict() for item in rule_findings]
-            session["scanner_components"] = scanner_components
-            session["scanner_complete"] = True
-            session["phase"] = "scanned"
+            session.scanner_findings = [item.to_dict() for item in rule_findings]
+            session.scanner_components = scanner_components
+            session.scanner_complete = True
+            session.phase = "scanned"
             self._save_lead_session(task_id, session, ledger)
-        rule_findings = self._restore_findings(session["scanner_findings"])
+        rule_findings = self._restore_findings(session.scanner_findings)
 
-        if not session["delegations"]:
+        if not session.delegations:
             decision = self._run_lead(
                 "delegate", {
                     **self._model_diff(
@@ -569,20 +555,20 @@ class AgenticReviewer(Reviewer):
                         for name in sorted(available_skills)
                     ],
                     "requested_agent_skills": requested_skills,
-                    "scanner_findings": session["scanner_findings"],
+                    "scanner_findings": session.scanner_findings,
                     "recalled_memory": memory_context,
                 }, suite, ledger, task_id, max_steps=1, allow_tools=False,
             )
-            session["delegations"] = self._normalize_delegations(
+            session.delegations = LeadSession.normalize_delegations(
                 decision.get("delegations"), worker_roles, parsed.files,
                 set(available_skills), requested_skills,
             )
-            session["lead_delegation"] = self._public_decision(decision)
-            session["risk_level"] = self._normalize_risk_level(
+            session.lead_delegation = self._public_decision(decision)
+            session.risk_level = LeadSession.normalize_risk_level(
                 decision.get("risk_level")
             )
-            session["phase"] = "delegated"
-            for assignment in session["delegations"]:
+            session.phase = "delegated"
+            for assignment in session.delegations:
                 ledger.trace(
                     "lead-session", "assignment_created",
                     assignment_id=assignment["assignment_id"],
@@ -591,52 +577,52 @@ class AgenticReviewer(Reviewer):
                 )
             self._save_lead_session(task_id, session, ledger)
 
-        risk_level = self._normalize_risk_level(session.get("risk_level"))
+        risk_level = session.risk_level
         high_risk = risk_level == "high"
         self._run_pending_assignments(
             task_id, session, diff, parsed, suite, ledger,
-            session["delegations"], revision_round=0,
+            session.delegations, revision_round=0,
             memory_context=memory_context,
             available_skills=available_skills,
             max_steps=3 if high_risk else 1,
             allow_tools=high_risk,
         )
-        session["phase"] = "workers-completed"
+        session.phase = "workers-completed"
         self._save_lead_session(task_id, session, ledger)
 
         final_assessment = {}
         if high_risk:
             candidates = self._session_candidates(session)
-            if not session["lead_assessments"]:
+            if not session.lead_assessments:
                 assessment = self._run_lead(
                     "assess-workers", {
                         **self._model_diff(
                             diff, task_id, "lead:assess-workers",
                             focus_files=[item.path for item in candidates],
                         ),
-                        "assignments": session["delegations"],
-                        "worker_results": list(session["worker_results"].values()),
+                        "assignments": session.delegations,
+                        "worker_results": list(session.worker_results.values()),
                         "candidate_findings": [item.to_dict() for item in candidates],
                         "revision_round": 0,
                         "remaining_revision_rounds": 1,
                         "recalled_memory": memory_context,
                     }, suite, ledger, task_id, max_steps=1, allow_tools=False,
                 )
-                session["lead_assessments"].append(self._public_decision(assessment))
+                session.lead_assessments.append(self._public_decision(assessment))
                 self._save_lead_session(task_id, session, ledger)
             else:
-                assessment = session["lead_assessments"][0]
+                assessment = session.lead_assessments[0]
             final_assessment = assessment
-            requests = self._normalize_revision_requests(
-                assessment.get("revision_requests"), session["delegations"],
+            requests = LeadSession.normalize_revision_requests(
+                assessment.get("revision_requests"), session.delegations,
             )
             revision_assignments = []
             for request in requests:
                 key = "1:%s" % request["assignment_id"]
-                if key in session["revision_results"]:
+                if key in session.revision_results:
                     continue
                 original = next(
-                    item for item in session["delegations"]
+                    item for item in session.delegations
                     if item["assignment_id"] == request["assignment_id"]
                 )
                 revision = dict(original)
@@ -655,9 +641,9 @@ class AgenticReviewer(Reviewer):
             )
             for revision in revision_assignments:
                 key = revision["run_id"]
-                result = session["worker_results"].pop(key)
-                session["revision_results"][key] = result
-                session["worker_results"][revision["assignment_id"]] = result
+                result = session.worker_results.pop(key)
+                session.revision_results[key] = result
+                session.worker_results[revision["assignment_id"]] = result
                 ledger.trace(
                     "lead-session", "revision_completed",
                     assignment_id=revision["assignment_id"],
@@ -665,13 +651,13 @@ class AgenticReviewer(Reviewer):
                     status=result["status"],
                 )
             if requests:
-                session["revision_rounds"] = 1
-                session["phase"] = "revision-1-completed"
+                session.revision_rounds = 1
+                session.phase = "revision-1-completed"
                 self._save_lead_session(task_id, session, ledger)
 
         candidates = self._session_candidates(session)
-        session["candidate_findings_before_critic"] = len(candidates)
-        if "critic" in enabled and not session.get("critic_complete"):
+        session.candidate_findings_before_critic = len(candidates)
+        if "critic" in enabled and not session.critic_complete:
             critic_result = self._run_critic(
                 diff, candidates,
                 str(final_assessment.get("critic_objective", "")),
@@ -679,22 +665,22 @@ class AgenticReviewer(Reviewer):
                 max_steps=1, allow_tools=False,
             )
             candidates, decisions = self._apply_critic(critic_result, candidates)
-            session["critic_decisions"] = decisions
-            session["critic_candidates"] = [item.to_dict() for item in candidates]
-            session["critic_complete"] = True
-            session["phase"] = "critic-completed"
+            session.critic_decisions = decisions
+            session.critic_candidates = [item.to_dict() for item in candidates]
+            session.critic_complete = True
+            session.phase = "critic-completed"
             self._save_lead_session(task_id, session, ledger)
-        elif session.get("critic_complete"):
-            candidates = self._restore_findings(session.get("critic_candidates") or [])
+        elif session.critic_complete:
+            candidates = self._restore_findings(session.critic_candidates or [])
         else:
-            session["critic_decisions"] = [
+            session.critic_decisions = [
                 {"finding_index": index, "accepted": True, "objections": []}
                 for index in range(len(candidates))
             ]
-            session["critic_candidates"] = [item.to_dict() for item in candidates]
-            session["critic_complete"] = True
+            session.critic_candidates = [item.to_dict() for item in candidates]
+            session.critic_complete = True
 
-        if not session["lead_final"]:
+        if not session.lead_final:
             final_decision = self._run_lead(
                 "finalize", {
                     **self._model_diff(
@@ -705,8 +691,8 @@ class AgenticReviewer(Reviewer):
                         {"finding_index": index, **item.to_dict()}
                         for index, item in enumerate(candidates)
                     ],
-                    "critic_decisions": session["critic_decisions"],
-                    "worker_results": list(session["worker_results"].values()),
+                    "critic_decisions": session.critic_decisions,
+                    "worker_results": list(session.worker_results.values()),
                     "instruction": (
                         "Return the indices that should be published. Resolve critic objections "
                         "explicitly and prefer changed-line tool evidence."
@@ -717,15 +703,15 @@ class AgenticReviewer(Reviewer):
             if "accepted_finding_indices" not in final_decision:
                 final_decision["accepted_finding_indices"] = [
                     int(item["finding_index"])
-                    for item in session["critic_decisions"]
+                    for item in session.critic_decisions
                     if item.get("accepted")
                 ]
-            session["lead_final"] = self._public_decision(final_decision)
-        accepted = self._apply_lead_final(session["lead_final"], candidates)
-        session["accepted_findings"] = [item.to_dict() for item in accepted]
-        session["phase"] = "completed"
-        session["stop_reason"] = (
-            "high-risk-one-revision-round" if session.get("revision_rounds")
+            session.lead_final = self._public_decision(final_decision)
+        accepted = self._apply_lead_final(session.lead_final, candidates)
+        session.accepted_findings = [item.to_dict() for item in accepted]
+        session.phase = "completed"
+        session.stop_reason = (
+            "high-risk-one-revision-round" if session.revision_rounds
             else "high-risk-single-pass" if high_risk else "single-pass"
         )
         self._save_lead_session(task_id, session, ledger, completed=True)
@@ -738,26 +724,26 @@ class AgenticReviewer(Reviewer):
             "protocol": "lead-workers",
             "roles": roles,
             "risk_level": risk_level,
-            "revision_rounds": int(session.get("revision_rounds", 0)),
+            "revision_rounds": int(session.revision_rounds),
             "lead": {
-                "delegation": session.get("lead_delegation") or {},
-                "assessments": session["lead_assessments"],
-                "final": session["lead_final"],
+                "delegation": session.lead_delegation or {},
+                "assessments": session.lead_assessments,
+                "final": session.lead_final,
             },
-            "assignments": session["delegations"],
+            "assignments": session.delegations,
             "agent_skills": sorted({
-                name for assignment in session["delegations"]
+                name for assignment in session.delegations
                 for name in assignment.get("skills") or []
             }),
-            "worker_results": list(session["worker_results"].values()),
-            "revision_results": list(session["revision_results"].values()),
+            "worker_results": list(session.worker_results.values()),
+            "revision_results": list(session.revision_results.values()),
             "scanner_findings": len(rule_findings),
-            "candidate_findings_before_critic": session["candidate_findings_before_critic"],
+            "candidate_findings_before_critic": session.candidate_findings_before_critic,
             "accepted_findings": len(accepted),
-            "critic_decisions": session["critic_decisions"],
-            "stop_reason": session["stop_reason"],
+            "critic_decisions": session.critic_decisions,
+            "stop_reason": session.stop_reason,
         }
-        components = session["scanner_components"] + [
+        components = session.scanner_components + [
             component(
                 ComponentKind.LLM_AGENT, name,
                 token_budget=self._token_budget(name),
@@ -828,7 +814,7 @@ class AgenticReviewer(Reviewer):
             return
         try:
             for finding in findings:
-                gate = getattr(finding, "gate", {}) or {}
+                gate = finding.gate or {}
                 self.memory_manager.remember_finding(
                     tenant_id, repository, task_id, finding.to_dict(),
                     bool(gate.get("passed")), gate.get("reasons") or (),
@@ -940,7 +926,7 @@ class AgenticReviewer(Reviewer):
         pending = [
             item for item in assignments
             if str(item.get("run_id") or item["assignment_id"])
-            not in session["worker_results"]
+            not in session.worker_results
         ]
         if not pending:
             return
@@ -981,7 +967,7 @@ class AgenticReviewer(Reviewer):
                     risk_domains=assignment.get("risk_domains") or (),
                 ),
                 "changed_files": parsed.files,
-                "scanner_findings": session["scanner_findings"],
+                "scanner_findings": session.scanner_findings,
                 "recalled_memory": memory_context or {"items": []},
                 "active_agent_skills": [skill.runtime_entry() for skill in selected_skills],
                 "instruction": (
@@ -1028,7 +1014,7 @@ class AgenticReviewer(Reviewer):
                         "revision_round": revision_round, "status": "failed",
                         "findings": [], "error": str(exc)[:1000],
                     }
-                session["worker_results"][run_id] = result
+                session.worker_results[run_id] = result
                 ledger.trace(
                     "lead-session", "worker_reported",
                     assignment_id=assignment["assignment_id"], run_id=run_id,
@@ -1036,71 +1022,6 @@ class AgenticReviewer(Reviewer):
                     findings=len(result["findings"]), revision_round=revision_round,
                 )
                 self._save_lead_session(task_id, session, ledger)
-
-    @staticmethod
-    def _normalize_delegations(
-        raw, worker_roles, changed_files, available_skills=None, requested_skills=None,
-    ):
-        available_skills = set(available_skills or set())
-        requested_skills = [
-            name for name in requested_skills or [] if name in available_skills
-        ]
-        values, seen_ids, covered = [], set(), set()
-        for index, item in enumerate(raw or []):
-            if not isinstance(item, dict):
-                continue
-            worker = str(item.get("worker", ""))
-            if worker not in worker_roles:
-                continue
-            assignment_id = str(
-                item.get("assignment_id") or "%s-%d" % (worker, index + 1)
-            )[:100]
-            if not assignment_id or assignment_id in seen_ids:
-                continue
-            seen_ids.add(assignment_id)
-            covered.add(worker)
-            values.append({
-                "assignment_id": assignment_id, "worker": worker,
-                "objective": str(item.get("objective") or "Review the assigned risk domain.")[:2000],
-                "files": [
-                    str(value)[:500] for value in (
-                        _string_list(item.get("files")) or changed_files
-                    )
-                ][:100],
-                "risk_domains": [
-                    str(value)[:100] for value in _string_list(item.get("risk_domains"))
-                ][:20],
-                "required_evidence": [
-                    str(value)[:200] for value in _string_list(item.get("required_evidence"))
-                ][:20],
-                "skills": list(dict.fromkeys(requested_skills + [
-                    str(value) for value in _string_list(item.get("skills"))
-                    if str(value) in available_skills
-                ])),
-            })
-            if len(values) >= 12:
-                break
-        defaults = {
-            "security": "Review security, authorization, input and sensitive-data risks.",
-            "correctness-reliability": (
-                "Review correctness, failure handling, concurrency, resources and compatibility."
-            ),
-        }
-        for worker in worker_roles:
-            if worker in covered or len(values) >= 12:
-                continue
-            values.append({
-                "assignment_id": "%s-default" % worker, "worker": worker,
-                "objective": defaults[worker], "files": list(changed_files)[:100],
-                "risk_domains": [], "required_evidence": ["changed-line evidence"],
-                "skills": list(requested_skills),
-            })
-        return values
-
-    @staticmethod
-    def _normalize_risk_level(value):
-        risk = str(value or "normal").strip().lower()
-        return risk if risk in {"low", "normal", "high"} else "normal"
 
     @staticmethod
     def _skill_tool_permissions(worker, skills):
@@ -1138,36 +1059,9 @@ class AgenticReviewer(Reviewer):
             read_skill_resource,
         ))
 
-    @staticmethod
-    def _normalize_revision_requests(raw, assignments):
-        by_id = {item["assignment_id"]: item for item in assignments}
-        values, seen = [], set()
-        for item in raw or []:
-            if not isinstance(item, dict):
-                continue
-            assignment_id = str(item.get("assignment_id", ""))
-            original = by_id.get(assignment_id)
-            if not original or assignment_id in seen:
-                continue
-            worker = str(item.get("worker") or original["worker"])
-            if worker != original["worker"]:
-                continue
-            guidance = str(item.get("guidance", "")).strip()
-            if not guidance:
-                continue
-            seen.add(assignment_id)
-            values.append({
-                "assignment_id": assignment_id, "worker": worker,
-                "guidance": guidance[:2000],
-                "required_evidence": [
-                    str(value)[:200] for value in _string_list(item.get("required_evidence"))
-                ][:20],
-            })
-        return values
-
     def _session_candidates(self, session):
-        findings = self._restore_findings(session["scanner_findings"])
-        for result in session["worker_results"].values():
+        findings = self._restore_findings(session.scanner_findings)
+        for result in session.worker_results.values():
             findings.extend(self._restore_findings(result.get("findings") or []))
         return self._merge(findings)
 
@@ -1255,34 +1149,14 @@ class AgenticReviewer(Reviewer):
         }
 
     def _load_lead_session(self, task_id, ledger):
-        if not task_id:
-            return {}
-        loader = getattr(self.store, "load_checkpoints", None)
-        if not loader:
-            return {}
-        checkpoint = (loader(task_id) or {}).get("agentic-lead-session") or {}
-        state = checkpoint.get("state") or {}
-        if state.get("protocol") != "lead-workers-v3":
-            return {}
-        if state.get("execution"):
-            ledger.restore(state["execution"])
-        session = dict(state.get("session") or {})
-        self.context_manager.restore(task_id, session.get("context_management"))
-        return session
+        return LeadSession.load(
+            self.store, task_id, ledger, self.context_manager,
+        )
 
     def _save_lead_session(self, task_id, session, ledger, completed=False):
-        if not task_id:
-            return
-        saver = getattr(self.store, "save_checkpoint", None)
-        if not saver:
-            return
-        session["context_management"] = self.context_manager.summary(task_id)
-        saver(
-            task_id, "agentic-lead-session", {
-                "protocol": "lead-workers-v3", "session": session,
-                "execution": ledger.summary(),
-            }, "completed" if completed else "in_progress",
-            max(1, len(ledger.model_calls)),
+        session.save(
+            self.store, task_id, ledger,
+            self.context_manager.summary(task_id), completed,
         )
 
     @staticmethod
