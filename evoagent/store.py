@@ -6,13 +6,14 @@ from datetime import datetime, timezone
 from typing import Any, Dict, Optional
 
 from .models import ReviewReport, TaskState, TraceEvent
+from .store_contract import StoreProtocol
 
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-class TaskStore:
+class TaskStore(StoreProtocol):
     def __init__(self, path: str):
         self.path = path
         self._lock = threading.Lock()
