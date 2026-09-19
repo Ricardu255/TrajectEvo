@@ -1,4 +1,5 @@
 """Hierarchical four-role review engine with a Lead and bounded worker roles."""
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import ast
 import hashlib
@@ -20,6 +21,14 @@ from .repository_tools import RepositoryToolSuite
 from .reviewer import LocalRuleReviewer, Reviewer
 from .runtime import AgentTool, RuntimeBudgetExceeded, ToolRegistry
 from .telemetry import ExecutionLedger
+
+
+# A findings JSON smaller than this is likely to truncate mid-object and void
+# the whole role run, so it is worth exceeding the remaining token budget.
+MIN_OUTPUT_TOKENS = 768
+# Task summaries keep full model-call logs; bound them or a long-running
+# service accumulates every review in memory.
+MAX_TRACKED_SUMMARIES = 128
 
 
 LEAD_PROMPT = """You are the Lead Agent for a hierarchical code review. You own decomposition,
@@ -167,7 +176,8 @@ class BoundedRole:
                 raise RuntimeBudgetExceeded("%s budget exhausted" % self.name)
             output_allowance = self.context_manager.output_token_limit(
                 self.prompt, min(
-                    self.max_output_tokens, max(256, self.token_budget - used)
+                    self.max_output_tokens,
+                    max(MIN_OUTPUT_TOKENS, self.token_budget - used),
                 )
             )
             current_context = user_context
@@ -317,7 +327,9 @@ class AgenticReviewer(Reviewer):
                 self.structured_config, ensure_ascii=False, sort_keys=True
             )
         self.gate = FindingGate()
-        self._summaries: Dict[str, dict] = {}
+        self._summaries: Dict[str, dict] = OrderedDict()
+        self._summary_lock = threading.Lock()
+        self.max_tracked_summaries = MAX_TRACKED_SUMMARIES
         self._memory_scopes: Dict[str, tuple] = {}
         self._memory_scope_lock = threading.Lock()
 
@@ -433,14 +445,22 @@ class AgenticReviewer(Reviewer):
             },
             "context_management": context_management,
         }
-        self._summaries[task_id] = summary
+        self._remember_summary(task_id, summary)
         saver = getattr(self.store, "save_checkpoint", None)
         if task_id and saver:
             saver(task_id, "agentic-summary", summary, "completed", 1)
         return gated.accepted
 
+    def _remember_summary(self, task_id: str, summary: dict) -> None:
+        with self._summary_lock:
+            self._summaries[task_id] = summary
+            self._summaries.move_to_end(task_id)
+            while len(self._summaries) > self.max_tracked_summaries:
+                self._summaries.popitem(last=False)
+
     def collaboration_summary(self, task_id: str) -> dict:
-        summary = self._summaries.get(task_id)
+        with self._summary_lock:
+            summary = self._summaries.get(task_id)
         if summary:
             return dict(summary)
         loader = getattr(self.store, "load_checkpoints", None)

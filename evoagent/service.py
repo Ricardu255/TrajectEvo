@@ -1,4 +1,5 @@
 import hashlib
+import threading
 import uuid
 from typing import Any, Dict, Optional
 
@@ -35,6 +36,7 @@ class ReviewService:
     def __init__(self, settings: Settings):
         self.settings = settings
         settings.validate_evolution()
+        self._reload_lock = threading.Lock()
         self.llm_config = settings.resolved_llm()
         self.store = create_store(settings.database_url, settings.db_path)
         self.memory = MemoryManager(
@@ -72,6 +74,8 @@ class ReviewService:
                 str(self.llm_config["base_url"]), str(self.llm_config["api_key"]),
                 str(self.llm_config["model"]), str(self.llm_config["provider"]),
                 settings.timeout_seconds, dict(self.llm_config.get("headers") or {}),
+                retries=settings.llm_max_retries,
+                backoff_seconds=settings.llm_retry_backoff_seconds,
             ) if self.llm_config else None
         )
         self.reviewer = self._build_agentic_reviewer()
@@ -189,21 +193,26 @@ class ReviewService:
         return self.harness.run(task_id, repository, pull_request, diff, tenant_id)
 
     def reload_skills(self) -> list:
-        if self.llm_config:
-            active = self.store.get_active_skill_version("llm-review")
-            self.registry.register(
-                "llm-review",
-                self._build_llm_reviewer(active["prompt"] if active else ""),
-                "1.0.0", "Context-aware AI code review via %s" % self.llm_config["provider"],
+        with self._reload_lock:
+            if self.llm_config:
+                active = self.store.get_active_skill_version("llm-review")
+                self.registry.register(
+                    "llm-review",
+                    self._build_llm_reviewer(active["prompt"] if active else ""),
+                    "1.0.0", "Context-aware AI code review via %s" % self.llm_config["provider"],
+                )
+            self.registry.reload()
+            skills = self.registry.list()
+            reviewer = self._build_agentic_reviewer()
+            harness = ReviewHarness(
+                self.store, reviewer, self.settings.max_steps, self.settings.timeout_seconds,
+                observability=self.observability,
             )
-        self.registry.reload()
-        skills = self.registry.list()
-        self.reviewer = self._build_agentic_reviewer()
-        self.harness = ReviewHarness(
-            self.store, self.reviewer, self.settings.max_steps, self.settings.timeout_seconds,
-            observability=self.observability,
-        )
-        return skills
+            # Swap only after both objects exist so a request thread always sees
+            # a harness built around the reviewer it will actually execute.
+            self.reviewer = reviewer
+            self.harness = harness
+            return skills
 
     def _active_agent_skills(self, tenant_id: str) -> list:
         values = {skill.name: skill for skill in self.registry.agent_skills()}

@@ -5,6 +5,7 @@ maps every hunk to a compact semantic record, ranks hunks for the active role, a
 reduces the result to a bounded model-facing view.  Historical memories and tool
 observations are treated as untrusted context, never as proof.
 """
+from collections import OrderedDict
 from dataclasses import dataclass
 import hashlib
 import json
@@ -92,6 +93,7 @@ class ContextManager:
         self, context_window_tokens: int = 32768, input_token_budget: int = 20000,
         diff_token_budget: int = 12000, observation_token_budget: int = 4000,
         recent_observations: int = 2, map_chunk_tokens: int = 3000,
+        max_tracked_contexts: int = 256,
     ):
         self.context_window_tokens = max(2048, int(context_window_tokens))
         self.input_token_budget = max(
@@ -101,14 +103,24 @@ class ContextManager:
         self.observation_token_budget = max(256, int(observation_token_budget))
         self.recent_observations = max(0, min(int(recent_observations), 8))
         self.map_chunk_tokens = max(256, int(map_chunk_tokens))
-        self._events: Dict[str, List[Dict[str, Any]]] = {}
-        self._memory: Dict[str, Dict[str, Any]] = {}
+        # Per-task compression events are small but never read outside a
+        # task's own lifetime; bound the history or a long-running service
+        # keeps one entry per task it has ever seen.
+        self.max_tracked_contexts = max(16, int(max_tracked_contexts))
+        self._events: Dict[str, List[Dict[str, Any]]] = OrderedDict()
+        self._memory: Dict[str, Dict[str, Any]] = OrderedDict()
         self._lock = threading.Lock()
 
     def begin(self, context_key: str) -> None:
         with self._lock:
             self._events[context_key] = []
+            self._events.move_to_end(context_key)
             self._memory[context_key] = {"recalled": 0, "scopes": {}, "query_sha256": ""}
+            self._memory.move_to_end(context_key)
+            while len(self._events) > self.max_tracked_contexts:
+                self._events.popitem(last=False)
+            while len(self._memory) > self.max_tracked_contexts:
+                self._memory.popitem(last=False)
 
     def restore(self, context_key: str, summary: Optional[Dict[str, Any]]) -> None:
         if not summary:

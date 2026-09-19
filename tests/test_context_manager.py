@@ -10,6 +10,27 @@ from evoagent.memory import MemoryManager
 from evoagent.store import TaskStore
 
 
+class ContextEvictionTests(unittest.TestCase):
+    def test_tracked_contexts_are_bounded(self):
+        manager = ContextManager()
+        self.assertEqual(256, manager.max_tracked_contexts)
+        small = ContextManager(max_tracked_contexts=16)
+        for index in range(20):
+            small.begin("task-%d" % index)
+            small.compress_diff(
+                "--- a/app.py\n+++ b/app.py\n@@ -1 +1 @@\n+value = 1\n",
+                "task-%d" % index, "review",
+            )
+        self.assertEqual(16, len(small._events))
+        self.assertEqual(16, len(small._memory))
+        self.assertEqual([], small.summary("task-0")["compressions"])
+        self.assertEqual(1, small.summary("task-19")["compression_calls"])
+        self.assertEqual(
+            {"recalled": 0, "scopes": {}, "query_sha256": ""},
+            small._memory["task-19"],
+        )
+
+
 def large_diff():
     values = []
     for index in range(12):

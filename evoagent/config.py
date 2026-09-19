@@ -12,7 +12,9 @@ def load_dotenv(paths: Optional[Iterable[str]] = None) -> None:
 
     The project-root file has priority over ``evoagent/.env``.  This allows the
     latter to remain compatible with existing local setups while keeping the
-    conventional root-level ``.env`` as the recommended location.
+    conventional root-level ``.env`` as the recommended location.  Called when
+    settings are built rather than at import time, so importing this module
+    never mutates the process environment.
     """
     package_dir = os.path.dirname(os.path.abspath(__file__))
     project_root = os.path.dirname(package_dir)
@@ -40,9 +42,6 @@ def load_dotenv(paths: Optional[Iterable[str]] = None) -> None:
             if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
                 value = value[1:-1]
             os.environ.setdefault(key, value)
-
-
-load_dotenv()
 
 
 def _int(name: str, default: int) -> int:
@@ -89,6 +88,8 @@ class Settings:
     github_private_key_path: str = ""
     public_base_url: str = "http://127.0.0.1:8080"
     llm_provider: str = "local"
+    llm_max_retries: int = 2
+    llm_retry_backoff_seconds: float = 1.0
     deepseek_api_key: str = ""
     openrouter_api_key: str = ""
     openrouter_site_url: str = ""
@@ -227,6 +228,8 @@ class Settings:
 
     @classmethod
     def from_env(cls) -> "Settings":
+        """Build settings from the process environment, loading local .env files first."""
+        load_dotenv()
         return cls(
             host=os.getenv("EVOAGENT_HOST", "127.0.0.1"),
             port=_int("EVOAGENT_PORT", 8080),
@@ -254,6 +257,10 @@ class Settings:
             github_private_key_path=os.getenv("EVOAGENT_GITHUB_PRIVATE_KEY_PATH", ""),
             public_base_url=os.getenv("EVOAGENT_PUBLIC_BASE_URL", "http://127.0.0.1:8080").rstrip("/"),
             llm_provider=os.getenv("EVOAGENT_LLM_PROVIDER", "local"),
+            llm_max_retries=_non_negative_int("EVOAGENT_LLM_MAX_RETRIES", 2),
+            llm_retry_backoff_seconds=max(
+                0.0, float(os.getenv("EVOAGENT_LLM_RETRY_BACKOFF_SECONDS", "1"))
+            ),
             deepseek_api_key=os.getenv("EVOAGENT_DEEPSEEK_API_KEY", ""),
             openrouter_api_key=os.getenv("EVOAGENT_OPENROUTER_API_KEY", ""),
             openrouter_site_url=os.getenv("EVOAGENT_OPENROUTER_SITE_URL", ""),

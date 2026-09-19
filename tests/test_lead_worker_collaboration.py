@@ -171,6 +171,18 @@ class LeadWorkerCollaborationTests(unittest.TestCase):
         self.assertTrue(any(item["kind"] == "task_summary" for item in episodes))
 
 
+class SummaryEvictionTests(unittest.TestCase):
+    def test_task_summaries_are_bounded(self):
+        reviewer = AgenticReviewer(None, None)
+        reviewer.max_tracked_summaries = 3
+        for index in range(5):
+            reviewer._remember_summary("task-%d" % index, {"index": index})
+        self.assertEqual(3, len(reviewer._summaries))
+        self.assertNotIn("task-0", reviewer._summaries)
+        self.assertIn("task-4", reviewer._summaries)
+        self.assertEqual({"index": 4}, reviewer.collaboration_summary("task-4"))
+
+
 class ModelOutputParsingTests(unittest.TestCase):
     @staticmethod
     def _finding(index):
