@@ -159,6 +159,13 @@ class TaskQueue:
                 return True
         return False
 
-    def close(self) -> None:
+    def close(self, wait: bool = True) -> None:
+        """Stop delivery.  By default, drain in-flight work and cancel queued items.
+
+        Callers that shut the process down — or delete the store, like tests —
+        must not race a worker thread that still holds an open connection;
+        pass ``wait=False`` only when returning immediately matters more than
+        a clean teardown.
+        """
         self._stop.set()
-        self._executor.shutdown(wait=False)
+        self._executor.shutdown(wait=wait, cancel_futures=True)
