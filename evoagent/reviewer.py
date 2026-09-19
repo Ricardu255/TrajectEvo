@@ -250,13 +250,20 @@ class OpenAICompatibleReviewer(Reviewer):
         valid_locations = {(item.path, item.line) for item in parsed.added_lines}
         findings: List[Finding] = []
         for raw in result.get("findings", []):
-            path, line = str(raw.get("path", "")), int(raw.get("line", 0))
+            try:
+                path, line = str(raw.get("path", "")), int(raw.get("line", 0))
+            except (TypeError, ValueError):
+                continue
             if (path, line) not in valid_locations:
                 continue
             try:
                 severity = Severity(str(raw.get("severity", "medium")).lower())
             except ValueError:
                 severity = Severity.MEDIUM
+            try:
+                confidence = float(raw.get("confidence", 0.7))
+            except (TypeError, ValueError):
+                confidence = 0.7
             findings.append(
                 Finding(
                     rule_id=str(raw.get("rule_id", "LLM-REVIEW"))[:80],
@@ -269,7 +276,7 @@ class OpenAICompatibleReviewer(Reviewer):
                     evidence=str(raw.get("evidence", ""))[:240],
                     fix=str(raw.get("fix", ""))[:2000],
                     test=str(raw.get("test", ""))[:2000],
-                    confidence=max(0.0, min(1.0, float(raw.get("confidence", 0.7)))),
+                    confidence=max(0.0, min(1.0, confidence)),
                 )
             )
         return findings

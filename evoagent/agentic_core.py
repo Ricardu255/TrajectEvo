@@ -108,6 +108,22 @@ def _collect_evidence(observations: List[dict]) -> Dict[str, dict]:
     return values
 
 
+def _strict_bool(value) -> bool:
+    """Interpret a model-provided boolean; the string "false" must not be truthy."""
+    if isinstance(value, str):
+        return value.strip().lower() in {"true", "yes", "1"}
+    return bool(value)
+
+
+def _string_list(value) -> List[str]:
+    """Coerce a model-provided array field; a bare string is one element, not a character sequence."""
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, (list, tuple)):
+        return [str(item) for item in value]
+    return []
+
+
 class BoundedRole:
     def __init__(
         self, name: str, prompt: str, client: JsonChatClient,
@@ -1026,11 +1042,19 @@ class AgenticReviewer(Reviewer):
             values.append({
                 "assignment_id": assignment_id, "worker": worker,
                 "objective": str(item.get("objective") or "Review the assigned risk domain.")[:2000],
-                "files": [str(value)[:500] for value in item.get("files") or changed_files][:100],
-                "risk_domains": [str(value)[:100] for value in item.get("risk_domains") or []][:20],
-                "required_evidence": [str(value)[:200] for value in item.get("required_evidence") or []][:20],
+                "files": [
+                    str(value)[:500] for value in (
+                        _string_list(item.get("files")) or changed_files
+                    )
+                ][:100],
+                "risk_domains": [
+                    str(value)[:100] for value in _string_list(item.get("risk_domains"))
+                ][:20],
+                "required_evidence": [
+                    str(value)[:200] for value in _string_list(item.get("required_evidence"))
+                ][:20],
                 "skills": list(dict.fromkeys(requested_skills + [
-                    str(value) for value in item.get("skills") or []
+                    str(value) for value in _string_list(item.get("skills"))
                     if str(value) in available_skills
                 ])),
             })
@@ -1116,7 +1140,7 @@ class AgenticReviewer(Reviewer):
                 "assignment_id": assignment_id, "worker": worker,
                 "guidance": guidance[:2000],
                 "required_evidence": [
-                    str(value)[:200] for value in item.get("required_evidence") or []
+                    str(value)[:200] for value in _string_list(item.get("required_evidence"))
                 ][:20],
             })
         return values
@@ -1138,7 +1162,7 @@ class AgenticReviewer(Reviewer):
         decisions = []
         for index, finding in enumerate(candidates):
             decision = by_index.get(index)
-            accepted = bool(decision and decision.get("accepted"))
+            accepted = bool(decision and _strict_bool(decision.get("accepted")))
             if decision:
                 try:
                     adjustment = float(decision.get("confidence_adjustment", 0))
