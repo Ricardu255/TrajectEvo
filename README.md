@@ -92,17 +92,19 @@ An offline demo with no API key required (built-in code-review fixtures: baselin
 python -m evoagent.trajectory demo
 ```
 
-For real usage, persist the trajectory results produced by each of the two versions as JSON (keyed by task id), then run the offline comparison and gate:
+For real usage, persist the trajectory results produced by each of the two versions as JSON (keyed by task id), then point the offline comparison and gate at your own files:
 
 ```powershell
 # Compare two versions and emit a Markdown regression report (--format json for structured output)
-python -m evoagent.trajectory compare --baseline trajectory_examples/baseline.json --candidate trajectory_examples/regression.json
+python -m evoagent.trajectory compare --baseline <baseline_results.json> --candidate <candidate_results.json>
 
 # Evaluate the release gate against release-gate.yaml thresholds; BLOCK exits with code 1 and can be wired into CI directly
-python -m evoagent.trajectory gate --baseline trajectory_examples/baseline.json --candidate trajectory_examples/regression.json --config release-gate.yaml
+python -m evoagent.trajectory gate --baseline <baseline_results.json> --candidate <candidate_results.json> --config release-gate.yaml
 ```
 
-The trajectories of the real multi-agent system are adapted via `ledger_to_spans(ExecutionLedger.summary())`: every tool call's arguments, success/failure, latency, and error are reconstructed into a standard tool span, so the gate evaluates the **real agent rather than a rule-based simulator**. Sample result files are in `trajectory_examples/`.
+The `demo` command above runs this exact baseline-vs-regression comparison and both gate outcomes (BLOCK/PASS) on built-in fixtures, so no API key or data files are required to try it.
+
+The trajectories of the real multi-agent system are adapted via `ledger_to_spans(ExecutionLedger.summary())`: every tool call's arguments, success/failure, latency, and error are reconstructed into a standard tool span, so the gate evaluates the **real agent rather than a rule-based simulator**.
 
 ## Model Configuration
 

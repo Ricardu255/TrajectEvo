@@ -92,17 +92,19 @@ python -m unittest discover -s tests -v
 python -m evoagent.trajectory demo
 ```
 
-真实使用时，先把两个版本各自跑出的轨迹结果存成 JSON（key 为任务 id），再离线对比与门禁评估：
+真实使用时，先把两个版本各自跑出的轨迹结果存成 JSON（key 为任务 id），再让离线对比与门禁读取你自己的文件：
 
 ```powershell
 # 对比两个版本，输出 Markdown 回归报告（--format json 可输出结构化结果）
-python -m evoagent.trajectory compare --baseline trajectory_examples/baseline.json --candidate trajectory_examples/regression.json
+python -m evoagent.trajectory compare --baseline <baseline_results.json> --candidate <candidate_results.json>
 
 # 按 release-gate.yaml 阈值评估发布门禁；BLOCK 时进程退出码为 1，可直接接入 CI
-python -m evoagent.trajectory gate --baseline trajectory_examples/baseline.json --candidate trajectory_examples/regression.json --config release-gate.yaml
+python -m evoagent.trajectory gate --baseline <baseline_results.json> --candidate <candidate_results.json> --config release-gate.yaml
 ```
 
-真实多角色 Agent 的轨迹由 `ledger_to_spans(ExecutionLedger.summary())` 适配而来：每次工具调用的入参、成败、耗时与错误都会还原成标准 tool span，因此门禁评测对象是真实 Agent，而不是规则模拟器。示例结果文件见 `trajectory_examples/`。
+上面的 `demo` 命令已用内置夹具完整演示了这套 baseline 与 regression 的对比，以及 BLOCK/PASS 两种门禁结果，无需 API Key 或任何数据文件即可体验。
+
+真实多角色 Agent 的轨迹由 `ledger_to_spans(ExecutionLedger.summary())` 适配而来：每次工具调用的入参、成败、耗时与错误都会还原成标准 tool span，因此门禁评测对象是真实 Agent，而不是规则模拟器。
 
 ## 模型配置
 
