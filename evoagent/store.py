@@ -1,3 +1,11 @@
+"""SQLite persistence backend implementing the full ``StoreProtocol``.
+
+Methods are grouped into domain sections (task lifecycle, collaboration and
+memory, failure cases, prompt evolution, skills, installations, checkpoints,
+webhooks, auth and audit, progressive delivery, observability); the same
+grouping and ordering is used by ``PostgresTaskStore`` so the two backends
+can be compared side by side.
+"""
 import hashlib
 import json
 import sqlite3
@@ -310,6 +318,7 @@ class TaskStore(StoreProtocol):
         if column not in columns:
             conn.execute("ALTER TABLE %s ADD COLUMN %s %s" % (table, column, declaration))
 
+    # --- Task lifecycle ---
     def create(
         self, task_id: str, repository: str, pull_request: Optional[int],
         payload: Dict[str, Any], tenant_id: str = "default",
@@ -386,6 +395,7 @@ class TaskStore(StoreProtocol):
             value["collaboration"].append(item)
         return value
 
+    # --- Agent collaboration and memory ---
     def record_agent_message(self, task_id: str, message: Dict[str, Any]) -> None:
         with self._lock, self._connect() as conn:
             conn.execute(
@@ -466,6 +476,7 @@ class TaskStore(StoreProtocol):
         value["metadata"] = json.loads(value.pop("metadata_json"))
         return value
 
+    # --- Task listing ---
     def list_tasks(self, limit: int = 50, tenant_id: Optional[str] = None) -> list:
         with self._connect() as conn:
             if tenant_id is None:
@@ -481,6 +492,7 @@ class TaskStore(StoreProtocol):
                 ).fetchall()
         return [dict(item) for item in rows]
 
+    # --- Failure cases ---
     def record_failure_case(self, task_id: str, category: str, payload: Dict[str, Any]) -> None:
         with self._lock, self._connect() as conn:
             conn.execute(
@@ -547,6 +559,7 @@ class TaskStore(StoreProtocol):
                 ids,
             )
 
+    # --- Prompt evolution: evaluation cases and runs ---
     def save_evaluation_case(
         self, name: str, split: str, diff: str, expected: list,
         source: str = "manual", active: bool = True,
@@ -639,6 +652,7 @@ class TaskStore(StoreProtocol):
             )
             return cursor.rowcount == 1
 
+    # --- Skill versions, artifacts and skill evolution runs ---
     def save_skill_version(self, skill_name: str, prompt: str, score: float, activate: bool = False) -> Dict[str, Any]:
         with self._lock, self._connect() as conn:
             row = conn.execute(
@@ -813,6 +827,7 @@ class TaskStore(StoreProtocol):
             values.append(value)
         return values
 
+    # --- GitHub installations ---
     def save_installation(
         self, installation_id: int, account_login: str, tenant_id: str = "default"
     ) -> None:
@@ -830,6 +845,7 @@ class TaskStore(StoreProtocol):
             ).fetchone()
         return str(row["tenant_id"]) if row else None
 
+    # --- Checkpoints, task payloads and cancellation ---
     def save_checkpoint(
         self, task_id: str, node: str, state: Dict[str, Any], status: str = "completed",
         attempt: int = 1, error: str = "",
@@ -911,6 +927,7 @@ class TaskStore(StoreProtocol):
                 (task_id, event.step, event.state.value, event.message, event.created_at),
             )
 
+    # --- Webhook idempotency ---
     def claim_webhook(
         self, delivery_id: str, tenant_id: str, event_type: str, payload_sha256: str,
     ) -> bool:
@@ -947,6 +964,7 @@ class TaskStore(StoreProtocol):
             ).fetchone()
         return dict(row) if row else None
 
+    # --- Auth, RBAC and audit ---
     def create_user(
         self, user_id: str, username: str, password_hash: str,
         tenant_id: str, role: str,
@@ -1026,6 +1044,7 @@ class TaskStore(StoreProtocol):
             values.append(item)
         return values
 
+    # --- Progressive delivery ---
     def save_deployment(self, tenant_id: str, skill_name: str, config: Dict[str, Any]) -> None:
         with self._lock, self._connect() as conn:
             conn.execute(
@@ -1152,6 +1171,7 @@ class TaskStore(StoreProtocol):
             values.append(item)
         return values
 
+    # --- Observability ---
     def create_alert(
         self, tenant_id: str, alert_key: str, severity: str, message: str,
     ) -> None:
