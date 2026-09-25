@@ -3,12 +3,18 @@ import tempfile
 import unittest
 
 from evoagent.evolution_proof import (
+    DEFAULT_PROMPT_DATASET,
     generate_prompt_evolution_cases,
     run_prompt_evolution_proof,
     write_jsonl,
 )
 
 
+@unittest.skipUnless(
+    os.path.exists(DEFAULT_PROMPT_DATASET),
+    "evaluation_data/prompt_evolution_130.jsonl is not checked in; the "
+    "prompt-evolution proof needs the pre-generated 130-case replay corpus",
+)
 class PromptEvolutionProofTests(unittest.TestCase):
     def test_feedback_evolution_improves_repository_disjoint_holdout(self):
         cases = generate_prompt_evolution_cases()

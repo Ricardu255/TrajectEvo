@@ -1,9 +1,11 @@
 import json
+import os
 import unittest
 
 from evoagent.diff_parser import parse_unified_diff
 from evoagent.evaluation_experiments import (
     AccuracyExperimentSuite,
+    DEFAULT_CONTROLLED_DATASET,
     load_controlled_pr_cases,
     SkillEvolutionExperimentSuite,
     prepare_controlled_experiment_cases,
@@ -13,6 +15,15 @@ from evoagent.evaluation_v2 import (
     experiment_reviewer_factories,
 )
 from evoagent.models import Finding, Severity
+
+
+# The 100-case corpus is kept local and is not checked in; tests that read it
+# run where the file exists and skip cleanly everywhere else.
+NEEDS_CONTROLLED_DATASET = unittest.skipUnless(
+    os.path.exists(DEFAULT_CONTROLLED_DATASET),
+    "evaluation_data/pr_diff_100.jsonl is not checked in; the controlled "
+    "corpus is kept local",
+)
 from evoagent.reviewer import Reviewer
 from evoagent.skill_evolution import SkillEvolutionEngine
 
@@ -118,6 +129,7 @@ def labelled_case(identifier, split, rule_id="SEC-PATH-TRAVERSAL"):
 
 
 class EvaluationExperimentTests(unittest.TestCase):
+    @NEEDS_CONTROLLED_DATASET
     def test_controlled_adapter_creates_repository_disjoint_60_20_20_splits(self):
         cases = prepare_controlled_experiment_cases(load_controlled_pr_cases())
         self.assertEqual(60, sum(item["split"] == "train" for item in cases))
@@ -135,6 +147,7 @@ class EvaluationExperimentTests(unittest.TestCase):
             for item in cases for finding in item["expected_findings"]
         ))
 
+    @NEEDS_CONTROLLED_DATASET
     def test_controlled_accuracy_reports_full_metric_contract(self):
         report = AccuracyExperimentSuite().run()
         self.assertTrue(report["controlled"]["dataset_contract_passed"])

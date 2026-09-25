@@ -2,7 +2,10 @@ import os
 import tempfile
 import unittest
 
-from evoagent.evaluation_experiments import load_controlled_pr_cases
+from evoagent.evaluation_experiments import (
+    DEFAULT_CONTROLLED_DATASET,
+    load_controlled_pr_cases,
+)
 from evoagent.evolution import RegressionEvaluator
 from evoagent.evaluation_harness import (
     dataset_fingerprint,
@@ -12,7 +15,17 @@ from evoagent.evaluation_harness import (
 from evoagent.models import Finding, Severity
 
 
+# The 100-case corpus is kept local and is not checked in; tests that read it
+# run where the file exists and skip cleanly everywhere else.
+NEEDS_CONTROLLED_DATASET = unittest.skipUnless(
+    os.path.exists(DEFAULT_CONTROLLED_DATASET),
+    "evaluation_data/pr_diff_100.jsonl is not checked in; the controlled "
+    "corpus is kept local",
+)
+
+
 class EndToEndEvaluationTests(unittest.TestCase):
+    @NEEDS_CONTROLLED_DATASET
     def test_generated_dataset_has_repository_level_split_and_expected_counts(self):
         cases = load_controlled_pr_cases()
         self.assertEqual(100, len(cases))
@@ -97,6 +110,7 @@ class EndToEndEvaluationTests(unittest.TestCase):
         report = RegressionEvaluator(lambda _prompt: Reviewer()).run("p", [case])
         self.assertEqual(1, report["case_results"][0]["tp"])
 
+    @NEEDS_CONTROLLED_DATASET
     def test_dataset_round_trip_has_stable_fingerprint(self):
         cases = load_controlled_pr_cases()
         handle, path = tempfile.mkstemp(suffix=".jsonl")
