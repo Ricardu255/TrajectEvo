@@ -27,3 +27,45 @@ jobs:
           pip install -r requirements-dev.txt
       - name: Run tests
         run: python -m pytest tests -q
+
+  release-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+      - name: Generate deterministic demo trajectories
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from evoagent.trajectory import build_demo_results, save_results
+          out = Path("output/trajectory-demo")
+          for version in ("baseline", "regression", "fixed"):
+              save_results(out / f"{version}.json", build_demo_results(version))
+          print("generated:", sorted(p.name for p in out.iterdir()))
+          PY
+      - name: Fixed candidate must PASS the release gate
+        run: |
+          python -m evoagent.trajectory gate \
+            --baseline output/trajectory-demo/baseline.json \
+            --candidate output/trajectory-demo/fixed.json \
+            --format json --output output/trajectory-demo/gate-fixed.json
+          grep -q '"status": "PASS"' output/trajectory-demo/gate-fixed.json
+          echo "fixed candidate: PASS"
+      - name: Regression candidate must BLOCK with exit code 1
+        run: |
+          if python -m evoagent.trajectory gate \
+            --baseline output/trajectory-demo/baseline.json \
+            --candidate output/trajectory-demo/regression.json \
+            --format json --output output/trajectory-demo/gate-regression.json; then
+            echo "::error::regression candidate PASSED the gate; BLOCK contract is broken"
+            exit 1
+          fi
+          grep -q '"status": "BLOCK"' output/trajectory-demo/gate-regression.json
+          echo "regression candidate: BLOCK with exit code 1 (CI interception verified)"
