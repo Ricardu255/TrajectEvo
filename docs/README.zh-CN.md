@@ -118,16 +118,16 @@ python -m evoagent.trajectory gate --tasks tasks.jsonl --baseline baseline_resul
 
 ```mermaid
 flowchart TD
-    Trigger["push / pull request"] --> Pytest["pytest 任务：Python 3.9 + 3.11"]
+    Trigger["push / pull request"] --> Pytest["pytest 任务<br/>Python 3.9 + 3.11"]
     Trigger --> Gate["release-gate 任务"]
-    Gate --> Gen["build_demo_results：baseline / regression / fixed 三版轨迹"]
+    Gate --> Gen["build_demo_results<br/>baseline / regression / fixed<br/>三版演示轨迹"]
     Gen --> FixedGate["gate：fixed 候选"]
-    FixedGate --> PassCheck{"退出码 0 且 status = PASS？"}
+    FixedGate --> PassCheck{"退出码 0<br/>status = PASS？"}
     PassCheck -- "是" --> RegGate["gate：regression 候选"]
-    PassCheck -- "否" --> Fail1["任务失败：PASS 契约被破坏"]
-    RegGate --> BlockCheck{"退出码 1 且 status = BLOCK？"}
+    PassCheck -- "否" --> Fail1["任务失败<br/>PASS 契约被破坏"]
+    RegGate --> BlockCheck{"退出码 1<br/>status = BLOCK？"}
     BlockCheck -- "是" --> Ok["发布门禁契约验证通过"]
-    BlockCheck -- "否" --> Fail2["任务失败：BLOCK 契约被破坏"]
+    BlockCheck -- "否" --> Fail2["任务失败<br/>BLOCK 契约被破坏"]
 ```
 
 BLOCK 断言同时校验退出码和门禁状态字段，因此门禁进程崩溃不可能伪装成一次正确的拦截。要验证真实候选版本，把演示轨迹替换为上文导出的命令产物即可。

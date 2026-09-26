@@ -118,16 +118,16 @@ Every push and pull request runs two GitHub Actions jobs:
 
 ```mermaid
 flowchart TD
-    Trigger["push / pull request"] --> Pytest["pytest job: Python 3.9 + 3.11"]
+    Trigger["push / pull request"] --> Pytest["pytest job<br/>Python 3.9 + 3.11"]
     Trigger --> Gate["release-gate job"]
-    Gate --> Gen["build_demo_results: baseline / regression / fixed trajectories"]
+    Gate --> Gen["build_demo_results<br/>baseline / regression / fixed<br/>demo trajectories"]
     Gen --> FixedGate["gate: fixed candidate"]
-    FixedGate --> PassCheck{"exit 0 and status = PASS?"}
+    FixedGate --> PassCheck{"exit 0<br/>status = PASS?"}
     PassCheck -- "yes" --> RegGate["gate: regression candidate"]
-    PassCheck -- "no" --> Fail1["job fails: PASS contract broken"]
-    RegGate --> BlockCheck{"exit 1 and status = BLOCK?"}
+    PassCheck -- "no" --> Fail1["job fails<br/>PASS contract broken"]
+    RegGate --> BlockCheck{"exit 1<br/>status = BLOCK?"}
     BlockCheck -- "yes" --> Ok["release-gate contract verified"]
-    BlockCheck -- "no" --> Fail2["job fails: BLOCK contract broken"]
+    BlockCheck -- "no" --> Fail2["job fails<br/>BLOCK contract broken"]
 ```
 
 The BLOCK assertion checks both the exit code and the gate status field, so a crashed gate run cannot masquerade as a correct interception. To gate a real candidate, replace the demo trajectories with the export commands shown above.
