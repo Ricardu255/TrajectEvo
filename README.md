@@ -114,20 +114,24 @@ The `demo` command and the repository CI gate job check the deterministic PASS/B
 Every push and pull request runs two GitHub Actions jobs:
 
 1. **pytest** — the full test suite on Python 3.9 and 3.11 (dataset-dependent tests skip cleanly because the corpora are kept local).
-2. **release-gate** — verifies the deterministic PASS/BLOCK contract of the trajectory release gate end to end:
+2. **release-gate** — verifies the release-gate contract end to end with built-in deterministic demo trajectories (no API key), in two steps:
+   - **pass-through check**: the fixed candidate must be allowed through (exit 0, status = PASS);
+   - **block check**: the regression candidate must be blocked (exit 1, status = BLOCK).
+
+   The block check asserts both the exit code and the status field, so a crashed gate run cannot masquerade as a correct interception. To gate a real candidate, replace the demo trajectories with results exported from review reports and use the same labeled task set (see the export / gate commands above).
 
 ```mermaid
 flowchart TD
-    Trigger["push / pull request"] --> Pytest["pytest job<br/>Python 3.9 + 3.11"]
-    Trigger --> Gate["release-gate job"]
-    Gate --> Gen["build_demo_results<br/>baseline / regression / fixed<br/>demo trajectories"]
-    Gen --> FixedGate["gate: fixed candidate"]
-    FixedGate --> PassCheck{"exit 0<br/>status = PASS?"}
-    PassCheck -- "yes" --> RegGate["gate: regression candidate"]
-    PassCheck -- "no" --> Fail1["job fails<br/>PASS contract broken"]
-    RegGate --> BlockCheck{"exit 1<br/>status = BLOCK?"}
+    Trigger["push / pull request"] --> Pytest["pytest job<br/>full suite on Python 3.9 + 3.11"]
+    Trigger --> Gate["release-gate job<br/>verify the PASS/BLOCK contract"]
+    Gate --> Gen["Generate three demo trajectories<br/>baseline / regression / fixed"]
+    Gen --> FixedGate["Step 1: gate the fixed candidate"]
+    FixedGate --> PassCheck{"Pass-through check<br/>exit 0 and status = PASS?"}
+    PassCheck -- "yes" --> RegGate["Step 2: gate the regression candidate"]
+    PassCheck -- "no" --> Fail1["job fails<br/>fixed candidate was not allowed through"]
+    RegGate --> BlockCheck{"Block check<br/>exit 1 and status = BLOCK?"}
     BlockCheck -- "yes" --> Ok["release-gate contract verified"]
-    BlockCheck -- "no" --> Fail2["job fails<br/>BLOCK contract broken"]
+    BlockCheck -- "no" --> Fail2["job fails<br/>regression candidate was not blocked"]
 ```
 
 The BLOCK assertion checks both the exit code and the gate status field, so a crashed gate run cannot masquerade as a correct interception. To gate a real candidate, replace the demo trajectories with the export commands shown above.
