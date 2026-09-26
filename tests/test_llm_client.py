@@ -77,7 +77,33 @@ class JsonChatClientTests(unittest.TestCase):
         ):
             with self.assertRaises(RuntimeError) as ctx:
                 client.complete_json("role", "system", "user")
-        self.assertIn("truncated", str(ctx.exception))
+        self.assertIn("finish_reason=length", str(ctx.exception))
+
+    def test_null_content_response_is_retried(self):
+        client = self.make_client()
+        responses = [
+            chat_response(None, finish_reason="stop"),
+            chat_response('{"ok": 1}'),
+        ]
+        with patch("evoagent.llm.urllib.request.urlopen", side_effect=responses):
+            self.assertEqual({"ok": 1}, client.complete_json("role", "system", "user"))
+
+    def test_length_truncation_retries_with_doubled_budget(self):
+        client = self.make_client()
+        captured = []
+
+        def capture_urlopen(request, timeout=None):
+            captured.append(json.loads(request.data.decode("utf-8")))
+            if len(captured) == 1:
+                return chat_response("", finish_reason="length")
+            return chat_response('{"ok": 1}')
+
+        with patch("evoagent.llm.urllib.request.urlopen", side_effect=capture_urlopen):
+            self.assertEqual(
+                {"ok": 1}, client.complete_json("role", "system", "user", max_tokens=4000)
+            )
+        self.assertEqual(4000, captured[0]["max_tokens"])
+        self.assertEqual(8000, captured[1]["max_tokens"])
 
     def test_retry_after_header_overrides_backoff(self):
         client = self.make_client(retries=1)
@@ -98,6 +124,84 @@ class JsonChatClientTests(unittest.TestCase):
             with self.assertRaises(RuntimeError) as ctx:
                 client.complete_json("role", "system", "user")
         self.assertIn("HTTP 503", str(ctx.exception))
+
+
+class ParseModelJsonTests(unittest.TestCase):
+    def _parse(self, content, finish_reason="stop"):
+        from evoagent.llm import parse_model_json
+
+        return parse_model_json(content, finish_reason)
+
+    def test_plain_json(self):
+        self.assertEqual({"a": 1}, self._parse('{"a": 1}'))
+
+    def test_markdown_fences_are_stripped(self):
+        content = '```json\n{"findings": [{"path": "a.py"}]}\n```'
+        self.assertEqual({"findings": [{"path": "a.py"}]}, self._parse(content))
+
+    def test_trailing_prose_is_ignored(self):
+        content = '{"ok": true}\n\nI have returned the JSON as requested.'
+        self.assertEqual({"ok": True}, self._parse(content))
+
+    def test_raw_control_characters_in_strings(self):
+        content = '{"evidence": "line1\nline2\ttabbed"}'
+        self.assertEqual({"evidence": "line1\nline2\ttabbed"}, self._parse(content))
+
+    def test_failure_includes_content_preview(self):
+        with self.assertRaises(ValueError) as ctx:
+            self._parse("not json at all", finish_reason="length")
+        message = str(ctx.exception)
+        self.assertIn("finish_reason=length", message)
+        self.assertIn("not json at all", message)
+
+
+if __name__ == "__main__":
+    unittest.main()
+
+
+class TrailingCommaRepairTests(unittest.TestCase):
+    def _parse(self, content):
+        from evoagent.llm import parse_model_json
+
+        return parse_model_json(content)
+
+    def test_trailing_comma_before_closing_brace(self):
+        self.assertEqual(
+            {"findings": [{"a": 1}]},
+            self._parse('{"findings": [{"a": 1,},]}'),
+        )
+
+    def test_trailing_comma_in_nested_string_content_survives(self):
+        content = '{"evidence": "keep, this comma"}'
+        self.assertEqual({"evidence": "keep, this comma"}, self._parse(content))
+
+
+class WhitespaceResponseRetryTests(unittest.TestCase):
+    def test_whitespace_only_response_is_retried(self):
+        client = JsonChatClient(
+            "https://llm.test/v1", "key", "test-model", "test",
+            retries=2, backoff_seconds=0.0,
+        )
+        responses = [
+            chat_response("   ", finish_reason="stop"),
+            chat_response("   \n  ", finish_reason="stop"),
+            chat_response('{"ok": 1}'),
+        ]
+        with patch("evoagent.llm.urllib.request.urlopen", side_effect=responses):
+            self.assertEqual({"ok": 1}, client.complete_json("role", "system", "user"))
+
+    def test_whitespace_response_exhausting_retries_raises(self):
+        client = JsonChatClient(
+            "https://llm.test/v1", "key", "test-model", "test",
+            retries=1, backoff_seconds=0.0,
+        )
+        with patch(
+            "evoagent.llm.urllib.request.urlopen",
+            side_effect=[chat_response("   ", finish_reason="stop")] * 2,
+        ):
+            with self.assertRaises(RuntimeError) as ctx:
+                client.complete_json("role", "system", "user")
+        self.assertIn("invalid JSON", str(ctx.exception))
 
 
 if __name__ == "__main__":

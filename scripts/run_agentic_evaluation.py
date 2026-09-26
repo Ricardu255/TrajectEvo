@@ -46,6 +46,14 @@ def main():
     parser.add_argument("--timeout", type=int, default=120)
     parser.add_argument("--token-budget", type=int, default=12000)
     parser.add_argument("--time-budget", type=int, default=240)
+    parser.add_argument(
+        "--effort", default="",
+        help=(
+            "Optional reasoning-effort level for models that support it "
+            "(e.g. low). Recommended for review tasks: high-effort reasoning "
+            "can consume the whole output budget before any JSON is emitted."
+        ),
+    )
     parser.add_argument("--bootstrap-iterations", type=int, default=2000)
     parser.add_argument("--bootstrap-seed", type=int, default=20260819)
     parser.add_argument(
@@ -77,6 +85,7 @@ def main():
     client = JsonChatClient(
         args.base_url, args.api_key, args.model,
         provider=args.provider, timeout=args.timeout,
+        extra_payload=({"effort": args.effort} if args.effort else None),
     )
     skill_artifact = load_skill_artifact(
         args.evolved_skill, args.evolved_skill_name,

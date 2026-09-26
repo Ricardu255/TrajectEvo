@@ -13,6 +13,14 @@ from .telemetry import ExecutionLedger
 # the whole role run, so it is worth exceeding the remaining token budget.
 MIN_OUTPUT_TOKENS = 768
 
+# Final-action payloads by phase.  Real models sometimes emit the phase
+# payload without the {"action": "final"} envelope; when one of these keys is
+# present and no tool action was requested, the response is treated as final.
+FINAL_PAYLOAD_KEYS = frozenset({
+    "delegations", "revision_requests", "accepted_finding_indices",
+    "findings", "decisions",
+})
+
 
 class BoundedRole:
     def __init__(
@@ -92,6 +100,13 @@ class BoundedRole:
                 ledger, max_tokens=output_allowance,
             )
             kind = str(action.get("action", "")).strip().lower()
+            if kind not in {"tool", "final"} and isinstance(action.get("content"), dict):
+                # Some models echo the response_format spec as an outer
+                # envelope and nest the real action payload under "content".
+                action = action["content"]
+                kind = str(action.get("action", "")).strip().lower()
+            if kind != "tool" and any(key in action for key in FINAL_PAYLOAD_KEYS):
+                kind = "final"
             ledger.trace(
                 self.name, "autonomous_decision", step=step, action=kind,
                 tool=str(action.get("tool", "")), reason=str(action.get("reason", ""))[:500],
@@ -102,7 +117,10 @@ class BoundedRole:
                 ledger.trace(self.name, "finished", step=step)
                 return action
             if kind != "tool":
-                raise ValueError("%s returned an invalid action" % self.name)
+                raise ValueError(
+                    "%s returned an invalid action: %s"
+                    % (self.name, json.dumps(action, ensure_ascii=False, default=str)[:300])
+                )
             tool_name = str(action.get("tool", ""))
             arguments = action.get("arguments") or {}
             try:
