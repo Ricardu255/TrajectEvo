@@ -111,8 +111,44 @@ python -m evoagent.trajectory gate --tasks tasks.jsonl --baseline baseline_resul
 
 ## 持续集成
 
-MODEL_RUNTIME_FLOW.en.md
+## 运行逻辑与轨迹回归评估
 
+```mermaid
+flowchart TD
+    A["同一批审查任务<br/>API diff 或 GitHub PR"] --> B["基线版本与候选版本分别运行"]
+
+    subgraph REVIEW["每个版本的审查流程"]
+        B --> C["创建任务并保存 diff"]
+        C --> D["Planning：解析 diff"]
+        D --> E["Executing：规则扫描与记忆召回"]
+        E --> F["Lead 分派任务"]
+        F --> G["Security 与 Correctness/Reliability 并行审查"]
+        G --> H{"高风险？"}
+        H -- 是 --> I["Lead 评估；必要时返工一次"]
+        H -- 否 --> J["合并候选问题"]
+        I --> J
+        J --> K["Critic 质疑候选问题"]
+        K --> L["Lead 最终决策"]
+        L --> M["证据门控并生成报告"]
+        M --> N["保存报告与 execution.trajectory"]
+    end
+
+    subgraph REGRESSION["独立的轨迹回归评估"]
+        N --> O["按 task_id 收集两个版本的报告"]
+        O --> P["export：转换为标准轨迹"]
+        Q["JSONL 标注任务集<br/>预期工具、参数、答案、关键任务标记"] --> R
+        P --> R["逐任务评估两个版本"]
+        R --> S["检查工具链、角色内顺序、参数、执行错误与答案"]
+        S --> T["统计成功率、延迟、Token、成本及分类指标"]
+        T --> U["识别回归：基线成功且候选失败"]
+        U --> V["定位首错：工具选择、参数、执行或最终生成"]
+        V --> W["按 release-gate.yaml 检查阈值"]
+        W --> X{"门禁结果"}
+        X --> Y["PASS"]
+        X --> Z["WARNING"]
+        X --> AA["BLOCK：退出码 1，可阻断 CI"]
+    end
+```
 ## 模型配置
 
 DeepSeek 官方 API（按 Token 计费）：
