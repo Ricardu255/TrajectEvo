@@ -109,6 +109,29 @@ python -m evoagent.trajectory gate --tasks tasks.jsonl --baseline baseline_resul
 
 `ledger_to_spans(ExecutionLedger.summary())` 保留 Agent 角色、工具参数和错误、模型 Token 与成本。并行 worker 的平均延迟采用 Ledger 记录的真实墙钟时间，不再累加重叠调用的耗时。
 
+## 持续集成
+
+每次 push 和 pull request 会触发两个 GitHub Actions 任务：
+
+1. **pytest**——在 Python 3.9 和 3.11 上运行全量测试（数据集仅保留在本地，相关测试在 CI 中自动跳过）。
+2. **release-gate**——端到端验证轨迹发布门禁的确定性 PASS/BLOCK 契约：
+
+```mermaid
+flowchart TD
+    Trigger["push / pull request"] --> Pytest["pytest 任务：Python 3.9 + 3.11"]
+    Trigger --> Gate["release-gate 任务"]
+    Gate --> Gen["build_demo_results：baseline / regression / fixed 三版轨迹"]
+    Gen --> FixedGate["gate：fixed 候选"]
+    FixedGate --> PassCheck{"退出码 0 且 status = PASS？"}
+    PassCheck -- "是" --> RegGate["gate：regression 候选"]
+    PassCheck -- "否" --> Fail1["任务失败：PASS 契约被破坏"]
+    RegGate --> BlockCheck{"退出码 1 且 status = BLOCK？"}
+    BlockCheck -- "是" --> Ok["发布门禁契约验证通过"]
+    BlockCheck -- "否" --> Fail2["任务失败：BLOCK 契约被破坏"]
+```
+
+BLOCK 断言同时校验退出码和门禁状态字段，因此门禁进程崩溃不可能伪装成一次正确的拦截。要验证真实候选版本，把演示轨迹替换为上文导出的命令产物即可。
+
 ## 模型配置
 
 DeepSeek 官方 API（按 Token 计费）：
