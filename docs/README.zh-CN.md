@@ -111,28 +111,39 @@ python -m evoagent.trajectory gate --tasks tasks.jsonl --baseline baseline_resul
 
 ## 持续集成
 
-每次 push 和 pull request 会触发两个 GitHub Actions 任务：
-
-1. **pytest**——在 Python 3.9 和 3.11 上运行全量测试（数据集仅保留在本地，相关测试在 CI 中自动跳过）。
-2. **release-gate**——用内置的确定性演示轨迹（无需 API Key）端到端验证发布门禁契约，分两步：
-   - **放行验证**：fixed 候选必须被门禁放行（退出码 0，status = PASS）；
-   - **拦截验证**：regression 候选必须被门禁拦截（退出码 1，status = BLOCK）。
-
-   拦截验证同时校验退出码和状态字段，因此门禁进程崩溃不可能伪装成一次正确的拦截。要门禁真实候选版本，把演示轨迹替换为审查报告导出的结果，并使用同一份标注任务集（见上文的 export / gate 命令）。
-
-```mermaid
 flowchart TD
-    Trigger["push / pull request"] --> Pytest["pytest 任务<br/>Python 3.9 + 3.11 全量测试"]
-    Trigger --> Gate["release-gate 任务<br/>验证 PASS/BLOCK 契约"]
-    Gate --> Gen["生成三版演示轨迹<br/>baseline / regression / fixed"]
-    Gen --> FixedGate["第一步：gate 评审 fixed 候选"]
-    FixedGate --> PassCheck{"放行验证<br/>退出码 0 且 status = PASS？"}
-    PassCheck -- "是" --> RegGate["第二步：gate 评审 regression 候选"]
-    PassCheck -- "否" --> Fail1["任务失败<br/>fixed 候选未被放行"]
-    RegGate --> BlockCheck{"拦截验证<br/>退出码 1 且 status = BLOCK？"}
-    BlockCheck -- "是" --> Ok["发布门禁契约验证通过"]
-    BlockCheck -- "否" --> Fail2["任务失败<br/>regression 候选未被拦截"]
-```
+    A["同一批审查任务<br/>API diff 或 GitHub PR"] --> B["分别运行基线版本与候选版本"]
+
+    subgraph REVIEW["每个版本的审查流程"]
+        B --> C["创建任务、保存 diff"]
+        C --> D["Planning：解析 diff"]
+        D --> E["Executing：规则扫描、记忆召回"]
+        E --> F["Lead 分派任务"]
+        F --> G["Security / Correctness-Reliability 并行审查"]
+        G --> H{"高风险？"}
+        H -- 是 --> I["Lead 评估；必要时返工一次"]
+        H -- 否 --> J["合并候选问题"]
+        I --> J
+        J --> K["Critic 质疑"]
+        K --> L["Lead 最终决策"]
+        L --> M["证据门控、生成报告"]
+        M --> N["保存报告及 execution.trajectory"]
+    end
+
+    N --> O["按 task_id 收集<br/>基线与候选报告"]
+    O --> P["export：转换为标准轨迹"]
+    Q["JSONL 标注任务集<br/>预期工具、参数、答案、关键任务标记"] --> R
+    P --> R["逐任务评估两版本"]
+
+    R --> S["检查工具链及各角色顺序<br/>参数、执行错误、答案覆盖"]
+    S --> T["统计成功率、延迟、Token、成本<br/>并按任务类别汇总"]
+    T --> U["识别回归：基线成功且候选失败"]
+    U --> V["首错归因：工具选择 / 参数 / 执行 / 最终生成"]
+    V --> W["读取 release-gate.yaml 阈值"]
+    W --> X{"门禁结果"}
+    X --> Y["PASS"]
+    X --> Z["WARNING"]
+    X --> AA["BLOCK：退出码 1，CI 可据此阻断"]
 
 ## 模型配置
 
