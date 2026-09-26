@@ -84,7 +84,7 @@ python -m unittest discover -s tests -v
 
 ## Trajectory-Level Regression & Release Gate
 
-`evoagent/trajectory.py` performs version regression over standardized trajectories (lists of `TrajectorySpan`) that are decoupled from any concrete agent implementation: three per-task assertions (tool chain / arguments / answer), version metric comparison, first-error attribution, and a YAML gate.
+`evoagent/trajectory.py` compares standardized trajectories across versions. A task checks its tool chain, asserted arguments, execution errors, and answer text. It also reports the first observed divergence, version metrics, and a YAML release decision.
 
 An offline demo with no API key required (built-in code-review fixtures: baseline fully passes, regression is BLOCKed, fixed fully passes):
 
@@ -92,19 +92,22 @@ An offline demo with no API key required (built-in code-review fixtures: baselin
 python -m evoagent.trajectory demo
 ```
 
-For real usage, persist the trajectory results produced by each of the two versions as JSON (keyed by task id), then point the offline comparison and gate at your own files:
+For real reviews, use a JSONL task set with `task_id`, `category`, `input`, `expected_tools` (or `expected_tool_groups` keyed by Agent role), `expected_arguments`, and `expected_answer_contains`. Optional fields are `critical` and `tags`. Grouped tool chains preserve order within each role while allowing parallel roles to finish in either order. Review reports from `AgenticReviewer` contain `execution.trajectory`; collect each version's reports in a JSON object keyed by task id, then export and compare them:
 
 ```powershell
-# Compare two versions and emit a Markdown regression report (--format json for structured output)
-python -m evoagent.trajectory compare --baseline <baseline_results.json> --candidate <candidate_results.json>
+python -m evoagent.trajectory export --reports baseline_reports.json --output baseline_results.json
+python -m evoagent.trajectory export --reports candidate_reports.json --output candidate_results.json
+
+# Compare the same labelled tasks across versions
+python -m evoagent.trajectory compare --tasks tasks.jsonl --baseline baseline_results.json --candidate candidate_results.json
 
 # Evaluate the release gate against release-gate.yaml thresholds; BLOCK exits with code 1 and can be wired into CI directly
-python -m evoagent.trajectory gate --baseline <baseline_results.json> --candidate <candidate_results.json> --config release-gate.yaml
+python -m evoagent.trajectory gate --tasks tasks.jsonl --baseline baseline_results.json --candidate candidate_results.json --config release-gate.yaml
 ```
 
-The `demo` command above runs this exact baseline-vs-regression comparison and both gate outcomes (BLOCK/PASS) on built-in fixtures, so no API key or data files are required to try it.
+The `demo` command and the repository CI gate job check the deterministic PASS/BLOCK contract. They do not supply real review reports. To gate a real candidate in CI, provide the two report collections and the labelled JSONL task set as job inputs and run the commands above. `--dataset` only changes the display name in the report; `--tasks` selects the actual assertions.
 
-The trajectories of the real multi-agent system are adapted via `ledger_to_spans(ExecutionLedger.summary())`: every tool call's arguments, success/failure, latency, and error are reconstructed into a standard tool span, so the gate evaluates the **real agent rather than a rule-based simulator**.
+`ledger_to_spans(ExecutionLedger.summary())` preserves Agent roles, tool inputs and errors, and model token/cost usage. For parallel workers, average latency uses the ledger's elapsed wall time rather than the sum of overlapping calls.
 
 ## Model Configuration
 

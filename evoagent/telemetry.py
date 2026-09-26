@@ -27,6 +27,8 @@ class ToolCall:
     duration_ms: int
     result_preview: str = ""
     error: str = ""
+    start_ms: int = 0
+    end_ms: int = 0
 
 
 class ExecutionLedger:
@@ -73,9 +75,10 @@ class ExecutionLedger:
         duration_ms: int, result: Any = "", error: str = "",
     ) -> None:
         preview = str(result)[:1000]
+        end_ms = int((time.monotonic() - self.started) * 1000)
         call = ToolCall(
             role, tool, dict(arguments), bool(ok), int(duration_ms), preview,
-            str(error)[:1000],
+            str(error)[:1000], max(0, end_ms - int(duration_ms)), end_ms,
         )
         with self._lock:
             self.tool_calls.append(call)

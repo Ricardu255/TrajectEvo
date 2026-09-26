@@ -84,7 +84,7 @@ python -m unittest discover -s tests -v
 
 ## 轨迹级回归与发布门禁
 
-`evoagent/trajectory.py` 在与具体 Agent 实现解耦的标准化轨迹（`TrajectorySpan` 列表）上做版本回归：任务三断言（工具链 / 参数 / 答案）、版本指标对比、首错归因和 YAML 门禁。
+`evoagent/trajectory.py` 对标准化轨迹进行版本回归：检查工具链、关键参数、执行错误和答案文本，并输出首处分歧、版本指标与 YAML 发布结论。
 
 无需 API Key 的离线演示（内置代码审查场景夹具，baseline 全过、regression 被 BLOCK、fixed 全过）：
 
@@ -92,19 +92,22 @@ python -m unittest discover -s tests -v
 python -m evoagent.trajectory demo
 ```
 
-真实使用时，先把两个版本各自跑出的轨迹结果存成 JSON（key 为任务 id），再让离线对比与门禁读取你自己的文件：
+真实使用时，准备 JSONL 评测任务集，字段为 `task_id`、`category`、`input`、`expected_tools`（或按 Agent 角色划分的 `expected_tool_groups`）、`expected_arguments`、`expected_answer_contains`，可选 `critical` 和 `tags`。按角色划分时，同一角色内保持工具顺序，并行角色可按任意顺序完成。`AgenticReviewer` 的审查报告中会保存 `execution.trajectory`；把每个版本的审查报告整理成以任务 id 为键的 JSON 对象，再导出和比较：
 
 ```powershell
-# 对比两个版本，输出 Markdown 回归报告（--format json 可输出结构化结果）
-python -m evoagent.trajectory compare --baseline <baseline_results.json> --candidate <candidate_results.json>
+python -m evoagent.trajectory export --reports baseline_reports.json --output baseline_results.json
+python -m evoagent.trajectory export --reports candidate_reports.json --output candidate_results.json
+
+# 对同一份标注任务集比较两个版本
+python -m evoagent.trajectory compare --tasks tasks.jsonl --baseline baseline_results.json --candidate candidate_results.json
 
 # 按 release-gate.yaml 阈值评估发布门禁；BLOCK 时进程退出码为 1，可直接接入 CI
-python -m evoagent.trajectory gate --baseline <baseline_results.json> --candidate <candidate_results.json> --config release-gate.yaml
+python -m evoagent.trajectory gate --tasks tasks.jsonl --baseline baseline_results.json --candidate candidate_results.json --config release-gate.yaml
 ```
 
-上面的 `demo` 命令已用内置夹具完整演示了这套 baseline 与 regression 的对比，以及 BLOCK/PASS 两种门禁结果，无需 API Key 或任何数据文件即可体验。
+`demo` 命令和仓库现有 CI 门禁任务验证的是确定性样例的 PASS/BLOCK 契约，不提供真实审查数据。真实候选版本的 CI 门禁需向作业提供两个版本的报告集合和标注任务集，并运行上面的命令。`--dataset` 只改变报告显示名称；`--tasks` 才指定实际断言。
 
-真实多角色 Agent 的轨迹由 `ledger_to_spans(ExecutionLedger.summary())` 适配而来：每次工具调用的入参、成败、耗时与错误都会还原成标准 tool span，因此门禁评测对象是真实 Agent，而不是规则模拟器。
+`ledger_to_spans(ExecutionLedger.summary())` 保留 Agent 角色、工具参数和错误、模型 Token 与成本。并行 worker 的平均延迟采用 Ledger 记录的真实墙钟时间，不再累加重叠调用的耗时。
 
 ## 模型配置
 

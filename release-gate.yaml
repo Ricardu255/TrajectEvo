@@ -1,5 +1,5 @@
 # TrajectEvo 轨迹级发布门禁配置
-# 用法：python -m evoagent.trajectory gate --baseline baseline.json --candidate candidate.json --config release-gate.yaml
+# 用法：python -m evoagent.trajectory gate --tasks tasks.jsonl --baseline baseline.json --candidate candidate.json --config release-gate.yaml
 # 任一 block 级规则违规 => BLOCK（进程退出码 1，CI 失败）；仅 warning 级违规 => WARNING。
 
 thresholds:

@@ -2,21 +2,21 @@
 
 模块职责（移植自 TrajectIQ，适配 EVO 的真实 Agent 执行轨迹）：
 1. 以标准化轨迹（TrajectorySpan 列表）为评测对象，不依赖某个具体 Agent 实现；
-2. 对同一评测任务集运行两个版本（baseline / candidate），识别"基线通过、候选失败"
+2. 对同一评测任务集的两个版本（baseline / candidate）结果识别"基线通过、候选失败"
    的回归任务，并按任务类别切片对比质量与成本指标；
 3. 对每条回归任务逐 step 对齐工具调用序列，定位第一处分歧（首错归因）；
 4. 按 YAML 阈值输出 PASS / WARNING / BLOCK 发布门禁结论，BLOCK 时进程退出码为 1，
    可直接接入 CI。
 
 与 TrajectIQ 的差异：
-- 真实对接点是 ``ledger_to_spans``：把 EVO 的 ExecutionLedger 摘要转成标准轨迹，
-  因此评测对象可以是真实多角色 Agent，而不是规则模拟器；
+- 真实对接点是 ``ledger_to_spans``：审查报告保存 ExecutionLedger 的标准轨迹，
+  可从已保存的真实多角色 Agent 报告导出评测结果；
 - 评测结果支持 JSON 落盘（save_results/load_results），两个版本可分别运行后再比较；
 - 内置 build_demo_* 确定性夹具，无需 API Key 即可离线演示完整 PASS/BLOCK 流程。
 
 调用关系：
 - 上游：harness/agentic_core 的 ExecutionLedger.summary()，或离线 JSON 结果；
-- 下游：CI 发布门禁、进化引擎（evolution.py）的候选版本验证。
+- 下游：离线对比和发布门禁；仓库 CI 默认只验证确定性演示契约。
 """
 import argparse
 import json
@@ -43,6 +43,7 @@ class TrajectorySpan:
     prompt_tokens: int = 0
     completion_tokens: int = 0
     cost_usd: float = 0.0
+    role: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -60,11 +61,13 @@ class TrajectoryTask:
     expected_answer_contains: Tuple[str, ...] = ()
     critical: bool = False
     tags: Tuple[str, ...] = ()
+    # Independent roles may interleave; order remains significant inside a role.
+    expected_tool_groups: Dict[str, Tuple[str, ...]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
 class TaskEvaluation:
-    """单任务评测结果：工具链、参数、答案三组独立断言。"""
+    """单任务评测结果：工具链、参数、执行状态、答案断言。"""
 
     task_id: str
     is_success: bool
@@ -74,6 +77,7 @@ class TaskEvaluation:
     is_critical: bool
     actual_tools: Tuple[str, ...]
     expected_tools: Tuple[str, ...]
+    has_successful_execution: bool = True
 
 
 @dataclass(frozen=True)
@@ -218,6 +222,13 @@ def _get_tool_spans(result: Dict[str, Any]) -> List[Dict[str, Any]]:
     return [span for span in result.get("spans", []) if span.get("kind") == "tool"]
 
 
+def _tools_by_role(spans: List[Dict[str, Any]]) -> Dict[str, Tuple[str, ...]]:
+    roles: Dict[str, List[str]] = {}
+    for span in spans:
+        roles.setdefault(str(span.get("role") or ""), []).append(span["name"])
+    return {role: tuple(names) for role, names in roles.items()}
+
+
 def _expected_arguments_match(expected: Dict[str, Any], actual: Any) -> bool:
     """子集语义：任务声明的每个期望参数都必须在实际入参中出现且相等。
 
@@ -233,11 +244,14 @@ def _expected_arguments_match(expected: Dict[str, Any], actual: Any) -> bool:
 
 
 def evaluate_task(*, task: TrajectoryTask, result: Dict[str, Any]) -> TaskEvaluation:
-    """三断言评测：工具链完全一致 + 关键参数子集匹配 + 答案包含期望文本。"""
+    """Check tool chain, asserted arguments, execution errors, and answer text."""
     tool_spans = _get_tool_spans(result)
     actual_tools = tuple(span["name"] for span in tool_spans)
-    # ① 工具选择：实际工具序列必须与期望完全一致（顺序敏感）
-    has_correct_tools = actual_tools == task.expected_tools
+    # A flat chain is ordered; grouped chains are ordered only within each role.
+    has_correct_tools = (
+        _tools_by_role(tool_spans) == task.expected_tool_groups
+        if task.expected_tool_groups else actual_tools == task.expected_tools
+    )
     # ② 工具参数：工具链正确的前提下，逐工具校验"声明的期望参数"是实际入参子集；
     #    任务未规定参数的工具不校验，实际入参里的额外无关字段不判错
     has_correct_arguments = has_correct_tools and all(
@@ -252,15 +266,23 @@ def evaluate_task(*, task: TrajectoryTask, result: Dict[str, Any]) -> TaskEvalua
         expected_text.lower() in answer.lower()
         for expected_text in task.expected_answer_contains
     )
+    has_successful_execution = not any(
+        span.get("error") for span in result.get("spans", [])
+    )
     return TaskEvaluation(
         task_id=task.task_id,
-        is_success=has_correct_tools and has_correct_arguments and has_expected_answer,
+        is_success=(has_correct_tools and has_correct_arguments
+                    and has_expected_answer and has_successful_execution),
         has_correct_tools=has_correct_tools,
         has_correct_arguments=has_correct_arguments,
         has_expected_answer=has_expected_answer,
         is_critical=task.critical,
         actual_tools=actual_tools,
-        expected_tools=task.expected_tools,
+        expected_tools=(task.expected_tools or tuple(
+            name for role in sorted(task.expected_tool_groups)
+            for name in task.expected_tool_groups[role]
+        )),
+        has_successful_execution=has_successful_execution,
     )
 
 
@@ -280,7 +302,16 @@ def evaluate_results(
     evaluations = tuple(evaluate_task(task=task, result=result) for task, result in runs)
     task_count = len(evaluations)
     critical_evaluations = tuple(item for item in evaluations if item.is_critical)
-    run_metrics = tuple(aggregate_run_metrics(result.get("spans", [])) for _, result in runs)
+    run_metrics = []
+    for _, result in runs:
+        item = aggregate_run_metrics(result.get("spans", []))
+        # A real multi-agent run contains parallel workers.  The ledger's
+        # monotonic wall duration is the latency seen by the caller.
+        wall_ms = (result.get("metrics") or {}).get("duration_ms")
+        if wall_ms is not None:
+            item["duration_ms"] = float(wall_ms)
+        run_metrics.append(item)
+    run_metrics = tuple(run_metrics)
     metrics = VersionMetrics(
         version=version_name,
         task_count=task_count,
@@ -378,15 +409,42 @@ def locate_first_error(
     baseline_result: Dict[str, Any],
     candidate_result: Dict[str, Any],
 ) -> FailureAttribution:
-    """逐 step 对齐两条轨迹的工具序列，返回第一处分歧（顺序即优先级）。"""
+    """Align tool steps within each declared role, or along a flat chain."""
     baseline_tools = _get_tool_spans(baseline_result)
     candidate_tools = _get_tool_spans(candidate_result)
-    maximum_steps = max(len(baseline_tools), len(candidate_tools))
+    planner_error = next((span for span in candidate_result.get("spans", [])
+                          if span.get("kind") == "planner" and span.get("error")), None)
+    if planner_error is not None:
+        return FailureAttribution(
+            task_id=task.task_id, category="execution_error",
+            step=int(planner_error.get("step", 1)), baseline_span="plan",
+            candidate_span=planner_error.get("name"),
+            reason="Candidate planning failed with %s." % planner_error["error"],
+            confidence=1.0, is_critical=task.critical,
+        )
+    if task.expected_tool_groups:
+        baseline_roles: Dict[str, List[Dict[str, Any]]] = {}
+        candidate_roles: Dict[str, List[Dict[str, Any]]] = {}
+        for span in baseline_tools:
+            baseline_roles.setdefault(str(span.get("role") or ""), []).append(span)
+        for span in candidate_tools:
+            candidate_roles.setdefault(str(span.get("role") or ""), []).append(span)
+        aligned = []
+        for role in sorted(set(baseline_roles) | set(candidate_roles)):
+            left, right = baseline_roles.get(role, []), candidate_roles.get(role, [])
+            for index in range(max(len(left), len(right))):
+                aligned.append((left[index] if index < len(left) else None,
+                                right[index] if index < len(right) else None))
+        aligned.sort(key=lambda pair: int((pair[1] or pair[0]).get("step", 0)))
+    else:
+        aligned = [
+            (baseline_tools[index] if index < len(baseline_tools) else None,
+             candidate_tools[index] if index < len(candidate_tools) else None)
+            for index in range(max(len(baseline_tools), len(candidate_tools)))
+        ]
 
-    for index in range(maximum_steps):
-        baseline_span = baseline_tools[index] if index < len(baseline_tools) else None
-        candidate_span = candidate_tools[index] if index < len(candidate_tools) else None
-        step = index + 2  # step 1 是 planner，工具从 step 2 开始
+    for index, (baseline_span, candidate_span) in enumerate(aligned):
+        step = int((candidate_span or baseline_span or {}).get("step", index + 2))
         if baseline_span is None:
             # 候选多调了基线没有的工具
             return FailureAttribution(
@@ -412,8 +470,10 @@ def locate_first_error(
                 reason="Candidate selected a different tool at the first divergent step.",
                 confidence=1.0, is_critical=task.critical,
             )
-        if baseline_span["input"] != candidate_span["input"]:
-            # 工具相同但参数不同
+        expected = task.expected_arguments.get(candidate_span["name"], {})
+        if (_expected_arguments_match(expected, baseline_span.get("input"))
+                and not _expected_arguments_match(expected, candidate_span.get("input"))):
+            # Attribute only arguments that the task actually asserts.
             return FailureAttribution(
                 task_id=task.task_id, category="tool_argument_error", step=step,
                 baseline_span=baseline_span["name"], candidate_span=candidate_span["name"],
@@ -428,6 +488,16 @@ def locate_first_error(
                 reason="Candidate tool failed with %s." % candidate_span["error"],
                 confidence=1.0, is_critical=task.critical,
             )
+    failed_span = next((span for span in candidate_result.get("spans", [])
+                        if span.get("error")), None)
+    if failed_span is not None:
+        return FailureAttribution(
+            task_id=task.task_id, category="execution_error",
+            step=int(failed_span.get("step", len(candidate_tools) + 2)),
+            baseline_span=failed_span.get("name"), candidate_span=failed_span.get("name"),
+            reason="Candidate execution failed with %s." % failed_span["error"],
+            confidence=1.0, is_critical=task.critical,
+        )
     # 工具轨迹完全一致但最终答案不达标
     return FailureAttribution(
         task_id=task.task_id, category="generation_error",
@@ -731,14 +801,15 @@ def ledger_to_spans(
     本函数按记录顺序还原 tool span（含参数、成败、耗时与错误），并补 planner /
     final 两个边界 span，使真实 Agent 轨迹可以直接进入 evaluate_results。
 
-    计量口径（串行步骤求和，不重不漏）：第一次模型调用计入 planner span，其余
-    模型调用（worker / critic / 综合）合计计入 final span，工具调用各占一个 tool
-    span。因此 token / 成本总量等于全部模型调用之和，延迟总量等于全部 LLM 调用与
-    工具调用的耗时之和（串行口径下约等于任务墙钟时长）。
+    Token and cost totals include each model call once.  Individual durations
+    remain on spans for diagnostics; the run metric uses the ledger's monotonic
+    wall duration when available, because worker calls can overlap.
     """
     spans: List[Dict[str, Any]] = []
     model_log = ledger_summary.get("model_call_log") or []
     tool_log = ledger_summary.get("tool_call_log") or []
+    if tool_log and all(int(item.get("end_ms", 0) or 0) > 0 for item in tool_log):
+        tool_log = sorted(tool_log, key=lambda item: int(item.get("start_ms", 0)))
 
     def _model_usage(item: Dict[str, Any]) -> Tuple[int, int, float, int]:
         return (
@@ -758,6 +829,8 @@ def ledger_to_spans(
         p_duration = 0
     spans.append(TrajectorySpan(
         step=1, kind="planner", name="plan", input=planner_input, output=None,
+        error=(str(model_log[0].get("error") or "model_failed")
+               if model_log and not model_log[0].get("ok", True) else None),
         start_time_ms=clock_ms, end_time_ms=clock_ms + p_duration,
         prompt_tokens=p_prompt, completion_tokens=p_completion, cost_usd=p_cost,
     ).to_dict())
@@ -766,14 +839,18 @@ def ledger_to_spans(
     # tool span 承担每次工具调用的耗时；工具本身不重复计 LLM token。
     for index, tool in enumerate(tool_log, start=2):
         duration = int(tool.get("duration_ms", 0) or 0)
+        has_timing = int(tool.get("end_ms", 0) or 0) > 0
+        start_ms = int(tool["start_ms"]) if has_timing else clock_ms
+        end_ms = int(tool["end_ms"]) if has_timing else start_ms + duration
         spans.append(TrajectorySpan(
             step=index, kind="tool", name=tool.get("tool", ""),
+            role=str(tool.get("role") or ""),
             input=tool.get("arguments", {}),
             output=tool.get("result_preview", ""),
-            error=None if tool.get("ok", True) else tool.get("error", "tool_failed"),
-            start_time_ms=clock_ms, end_time_ms=clock_ms + duration,
+            error=None if tool.get("ok", True) else (tool.get("error") or "tool_failed"),
+            start_time_ms=start_ms, end_time_ms=end_ms,
         ).to_dict())
-        clock_ms += duration
+        clock_ms = max(clock_ms, end_ms)
 
     # final span 承担"其余"模型调用（worker / critic / 综合）的合计。
     # 切片 [1:] 是关键：第一次调用已计入 planner，不能再重复累加一次。
@@ -784,10 +861,15 @@ def ledger_to_spans(
     f_duration = sum(int(item.get("duration_ms", 0) or 0) for item in remaining_models)
     spans.append(TrajectorySpan(
         step=len(spans) + 1, kind="final", name="final_answer", input=None, output=answer,
+        error=(next((str(item.get("error") or "model_failed") for item in remaining_models
+                     if not item.get("ok", True)), None)),
         start_time_ms=clock_ms, end_time_ms=clock_ms + f_duration,
         prompt_tokens=f_prompt, completion_tokens=f_completion, cost_usd=f_cost,
     ).to_dict())
-    return {"answer": answer, "spans": spans}
+    result = {"answer": answer, "spans": spans}
+    if ledger_summary.get("duration_ms") is not None:
+        result["metrics"] = {"duration_ms": ledger_summary["duration_ms"]}
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -805,6 +887,88 @@ def load_results(path: Path) -> Dict[str, Dict[str, Any]]:
     if not isinstance(payload, dict):
         raise ValueError("Trajectory result file must be a JSON object keyed by task id.")
     return payload
+
+
+def load_task_dataset(path: Path) -> Tuple[TrajectoryTask, ...]:
+    """Load a versioned JSONL task set used by compare and gate."""
+    tasks: List[TrajectoryTask] = []
+    seen = set()
+    for number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+        if not raw.strip():
+            continue
+        row = json.loads(raw)
+        if not isinstance(row, dict):
+            raise ValueError("Task dataset line %d must be an object." % number)
+        task_id, category, task_input = (
+            row.get("task_id"), row.get("category"), row.get("input")
+        )
+        if not all(isinstance(value, str) and value for value in
+                   (task_id, category, task_input)):
+            raise ValueError("Task dataset line %d needs task_id, category and input." % number)
+        if task_id in seen:
+            raise ValueError("Duplicate trajectory task id: %s" % task_id)
+        seen.add(task_id)
+        tools = row.get("expected_tools", [])
+        groups = row.get("expected_tool_groups", {})
+        arguments = row.get("expected_arguments", {})
+        answer = row.get("expected_answer_contains", [])
+        tags = row.get("tags", [])
+        if (not isinstance(tools, list) or not all(isinstance(v, str) for v in tools)
+                or not isinstance(groups, dict)
+                or not all(isinstance(role, str) and isinstance(names, list)
+                           and all(isinstance(name, str) for name in names)
+                           for role, names in groups.items())
+                or not isinstance(arguments, dict)
+                or not all(isinstance(name, str) and isinstance(value, dict)
+                           for name, value in arguments.items())
+                or not isinstance(answer, list)
+                or not all(isinstance(v, str) for v in answer)
+                or not isinstance(tags, list)
+                or not all(isinstance(v, str) for v in tags)
+                or not isinstance(row.get("critical", False), bool)):
+            raise ValueError("Task dataset line %d has invalid expectations." % number)
+        if "expected_answer_contains" not in row or (
+            "expected_tools" not in row and "expected_tool_groups" not in row
+        ) or (tools and groups):
+            raise ValueError(
+                "Task dataset line %d needs answer assertions and one tool-chain format." % number
+            )
+        tasks.append(TrajectoryTask(
+            task_id=task_id, category=category, input=task_input,
+            expected_tools=tuple(tools), expected_arguments=arguments,
+            expected_answer_contains=tuple(answer), critical=row.get("critical", False),
+            tags=tuple(tags),
+            expected_tool_groups={role: tuple(names) for role, names in groups.items()},
+        ))
+    if not tasks:
+        raise ValueError("Task dataset is empty.")
+    return tuple(tasks)
+
+
+def report_to_trajectory(report: Dict[str, Any]) -> Dict[str, Any]:
+    """Convert a persisted AgenticReviewer report to an evaluable run."""
+    execution = report.get("execution") or {}
+    if isinstance(execution.get("trajectory"), dict):
+        return execution["trajectory"]
+    if not execution.get("model_call_log") and not execution.get("tool_call_log"):
+        raise ValueError("Review report has no AgenticReviewer execution ledger.")
+    answer = json.dumps({
+        "summary": report.get("summary", ""),
+        "findings": report.get("findings", []),
+    }, ensure_ascii=False, sort_keys=True)
+    return ledger_to_spans(execution, answer=answer)
+
+
+def export_report_collection(path: Path) -> Dict[str, Dict[str, Any]]:
+    """Export a task-id-keyed collection of persisted review reports."""
+    reports = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(reports, dict) or not reports:
+        raise ValueError("Review report collection must be a non-empty task-id mapping.")
+    if not all(isinstance(task_id, str) and task_id and isinstance(report, dict)
+               for task_id, report in reports.items()):
+        raise ValueError("Review report collection has an invalid task or report.")
+    return {task_id: report_to_trajectory(report)
+            for task_id, report in reports.items()}
 
 
 # ---------------------------------------------------------------------------
@@ -936,6 +1100,8 @@ def main() -> None:
     compare_parser.add_argument("--baseline", required=True, type=Path)
     compare_parser.add_argument("--candidate", required=True, type=Path)
     compare_parser.add_argument("--dataset", default="trajectory_dataset")
+    compare_parser.add_argument("--tasks", required=True, type=Path,
+                                help="JSONL trajectory task set")
     compare_parser.add_argument("--format", choices=("json", "markdown"), default="markdown")
     compare_parser.add_argument("--output", type=Path)
 
@@ -944,12 +1110,23 @@ def main() -> None:
     gate_parser.add_argument("--candidate", required=True, type=Path)
     gate_parser.add_argument("--config", type=Path)
     gate_parser.add_argument("--dataset", default="trajectory_dataset")
+    gate_parser.add_argument("--tasks", required=True, type=Path,
+                             help="JSONL trajectory task set")
     gate_parser.add_argument("--format", choices=("json", "markdown"), default="markdown")
     gate_parser.add_argument("--output", type=Path)
 
     subparsers.add_parser("demo", help="run the built-in deterministic demo (baseline vs regression vs fixed)")
 
+    export_parser = subparsers.add_parser("export", help="convert persisted review reports into trajectory results")
+    export_parser.add_argument("--reports", required=True, type=Path,
+                               help="JSON object keyed by task id, containing review reports")
+    export_parser.add_argument("--output", required=True, type=Path)
+
     args = parser.parse_args()
+
+    if args.command == "export":
+        save_results(args.output, export_report_collection(args.reports))
+        return
 
     if args.command == "demo":
         tasks = build_demo_dataset()
@@ -973,8 +1150,7 @@ def main() -> None:
         return
 
     if args.command in ("compare", "gate"):
-        # 文件对比模式：任务集由内置数据集承担（真实使用时可替换为加载的标注任务集）
-        tasks = build_demo_dataset()
+        tasks = load_task_dataset(args.tasks)
         baseline_results = load_results(args.baseline)
         candidate_results = load_results(args.candidate)
         report = compare_results(

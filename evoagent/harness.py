@@ -1,4 +1,5 @@
 """Checkpointed review workflow powered by EvoAgent's own runtime."""
+import json
 import threading
 from typing import Any, Dict, Optional, TypedDict
 
@@ -9,6 +10,7 @@ from .runtime import (
     AgentRuntime, RuntimeBudgetExceeded, RuntimeCancelled, RuntimeNode,
 )
 from .store import TaskStore, utc_now
+from .trajectory import ledger_to_spans
 
 
 ALLOWED = {
@@ -161,6 +163,12 @@ class ReviewHarness:
             collaboration=collaboration,
             run_mode=run_mode, components=components, execution=execution,
         )
+        if execution.get("model_call_log") or execution.get("tool_call_log"):
+            answer = json.dumps({
+                "summary": report.summary,
+                "findings": [item.to_dict() for item in report.findings],
+            }, ensure_ascii=False, sort_keys=True)
+            report.execution["trajectory"] = ledger_to_spans(execution, answer=answer)
         return {"report": report.to_dict()}
 
     def _transition(self, target: TaskState, message: str) -> None:

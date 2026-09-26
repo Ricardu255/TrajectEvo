@@ -7,6 +7,7 @@ from evoagent.agentic_core import AgenticReviewer
 from evoagent.config import Settings
 from evoagent.diff_parser import parse_unified_diff
 from evoagent.evaluation_v2 import validate_real_dataset
+from evoagent.harness import ReviewHarness
 from evoagent.evolution_v2 import RootCauseEvolutionGenerator
 from evoagent.patching import apply_file_patch, parse_unified_patch
 from evoagent.service import ReviewService
@@ -139,6 +140,21 @@ class PhaseImplementationTests(unittest.TestCase):
                 if item["event"] == "autonomous_decision"
             ]
             self.assertTrue(decisions)
+
+    def test_real_agentic_review_persists_evaluable_trajectory(self):
+        store = TaskStore(self.path)
+        store.create("task", "org/repo", 1, {
+            "mode": "agentic",
+            "enabled_agents": ["lead", "security", "correctness-reliability", "critic"],
+        })
+        report = ReviewHarness(store, AgenticReviewer(store, FakeChatClient())).run(
+            "task", "org/repo", 1, DIFF,
+        )
+        trajectory = report.execution["trajectory"]
+        self.assertIn("SEC-EVAL", trajectory["answer"])
+        self.assertTrue(trajectory["spans"])
+        self.assertEqual(report.execution["duration_ms"], trajectory["metrics"]["duration_ms"])
+        self.assertEqual(trajectory, store.get("task")["report"]["execution"]["trajectory"])
 
     def test_structured_evolution_candidate_has_diff_and_usage(self):
         generated = RootCauseEvolutionGenerator(FakeChatClient()).generate([

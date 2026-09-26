@@ -2,7 +2,10 @@
 import json
 import tempfile
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
+from unittest.mock import patch
 
 from evoagent.trajectory import (
     DEFAULT_THRESHOLDS,
@@ -17,11 +20,15 @@ from evoagent.trajectory import (
     evaluate_gate,
     evaluate_results,
     evaluate_task,
+    export_report_collection,
     ledger_to_spans,
     load_results,
+    load_task_dataset,
     locate_first_error,
+    report_to_trajectory,
     save_results,
     validate_gate_config,
+    main,
 )
 
 
@@ -113,6 +120,34 @@ class EvaluateTaskTests(unittest.TestCase):
         self.assertTrue(evaluation.has_correct_arguments)
         self.assertFalse(evaluation.has_expected_answer)
         self.assertFalse(evaluation.is_success)
+
+    def test_tool_failure_cannot_pass_on_answer_text(self):
+        task = self._task(["ast_analyze"], answer_contains=("ast ok",))
+        failed = make_result([("ast_analyze", {"target": "t1"})],
+                             answer="ast ok", errors={"ast_analyze": "timeout"})
+        evaluation = evaluate_task(task=task, result=failed)
+        self.assertTrue(evaluation.has_expected_answer)
+        self.assertFalse(evaluation.has_successful_execution)
+        self.assertFalse(evaluation.is_success)
+
+    def test_parallel_roles_ignore_interleaving_but_preserve_each_role_order(self):
+        task = TrajectoryTask(
+            "t1", "security", "review", (), {}, ("ok",),
+            expected_tool_groups={"security": ("ast_analyze",), "reliability": ("symbol",)},
+        )
+        baseline = make_result([("ast_analyze", {}), ("symbol", {})])
+        candidate = make_result([("symbol", {}), ("ast_analyze", {})])
+        for result in (baseline, candidate):
+            for span in result["spans"]:
+                if span["kind"] == "tool":
+                    span["role"] = "security" if span["name"] == "ast_analyze" else "reliability"
+            self.assertTrue(evaluate_task(task=task, result=result).is_success)
+        report = compare_results(
+            baseline_name="base", candidate_name="candidate", tasks=(task,),
+            baseline_results={"t1": baseline}, candidate_results={"t1": candidate},
+            dataset_name="parallel",
+        )
+        self.assertEqual((), report.regressions)
 
 
 class CompareResultsTests(unittest.TestCase):
@@ -211,6 +246,14 @@ class FirstErrorAttributionTests(unittest.TestCase):
             task=self.TASK, baseline_result=baseline, candidate_result=candidate
         )
         self.assertEqual("tool_argument_error", attribution.category)
+
+    def test_irrelevant_argument_does_not_hide_generation_error(self):
+        task = TrajectoryTask("t1", "x", "y", ("a",), {"a": {"k": 1}}, ("NEEDLE",))
+        baseline = make_result([("a", {"k": 1})], answer="NEEDLE")
+        candidate = make_result([("a", {"k": 1, "request_id": "new"})], answer="missing")
+        self.assertEqual("generation_error", locate_first_error(
+            task=task, baseline_result=baseline, candidate_result=candidate,
+        ).category)
 
     def test_execution_error(self):
         baseline = make_result([("a", {"k": 1}), ("b", {"k": 2})])
@@ -359,6 +402,40 @@ class LedgerAdapterTests(unittest.TestCase):
         # 延迟 = 三次 LLM（50+70+90）+ 一次工具（12）= 222，LLM 耗时被纳入
         self.assertEqual(222.0, metrics["duration_ms"])
 
+    def test_real_wall_duration_overrides_parallel_call_sum(self):
+        task = TrajectoryTask("t1", "x", "review", ("a",), {}, ("ok",))
+        result = ledger_to_spans({
+            "duration_ms": 120,
+            "model_call_log": [
+                {"input_tokens": 10, "output_tokens": 1, "duration_ms": 100},
+                {"input_tokens": 10, "output_tokens": 1, "duration_ms": 100},
+            ],
+            "tool_call_log": [{"role": "security", "tool": "a", "arguments": {},
+                               "ok": True, "duration_ms": 50}],
+        }, answer="ok")
+        metrics, _ = evaluate_results(version_name="real", tasks=(task,),
+                                      results_by_task_id={"t1": result})
+        self.assertEqual(120, metrics.average_latency_ms)
+        self.assertEqual(22, metrics.average_total_tokens)
+
+    def test_failed_model_call_is_preserved(self):
+        task = TrajectoryTask("t1", "x", "review", (), {}, ("ok",))
+        result = ledger_to_spans({"model_call_log": [{"ok": False, "error": "timeout"}]},
+                                 answer="ok")
+        self.assertFalse(evaluate_task(task=task, result=result).is_success)
+
+    def test_tool_spans_use_recorded_start_time_across_parallel_roles(self):
+        result = ledger_to_spans({"tool_call_log": [
+            {"role": "slow", "tool": "b", "arguments": {}, "ok": True,
+             "duration_ms": 80, "start_ms": 10, "end_ms": 90},
+            {"role": "fast", "tool": "a", "arguments": {}, "ok": True,
+             "duration_ms": 20, "start_ms": 5, "end_ms": 25},
+        ], "duration_ms": 100}, answer="ok")
+        tools = [span for span in result["spans"] if span["kind"] == "tool"]
+        self.assertEqual(["a", "b"], [span["name"] for span in tools])
+        self.assertEqual([5, 10], [span["start_time_ms"] for span in tools])
+        self.assertEqual(["fast", "slow"], [span["role"] for span in tools])
+
     def test_aggregate_run_metrics_tolerates_empty(self):
         self.assertEqual(0, aggregate_run_metrics([])["total_tokens"])
 
@@ -409,6 +486,54 @@ class ResultPersistenceTests(unittest.TestCase):
             results["sec_001"]["spans"][0]["name"],
             loaded["sec_001"]["spans"][0]["name"],
         )
+
+    def test_custom_dataset_and_report_export_reach_cli(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            tasks_path = root / "tasks.jsonl"
+            tasks_path.write_text(json.dumps({
+                "task_id": "custom-1", "category": "review", "input": "review diff",
+                "expected_tools": ["ast_analyze"],
+                "expected_arguments": {"ast_analyze": {"path": "a.py"}},
+                "expected_answer_contains": ["SEC-1"],
+            }) + "\n", encoding="utf-8")
+            self.assertEqual("custom-1", load_task_dataset(tasks_path)[0].task_id)
+            report = {
+                "summary": "one finding", "findings": [{"rule_id": "SEC-1"}],
+                "execution": {"duration_ms": 20, "tool_call_log": [
+                    {"role": "security", "tool": "ast_analyze",
+                     "arguments": {"path": "a.py"}, "ok": True, "duration_ms": 5},
+                ]},
+            }
+            reports_path = root / "reports.json"
+            reports_path.write_text(json.dumps({"custom-1": report}), encoding="utf-8")
+            baseline_path = root / "baseline.json"
+            with patch("sys.argv", ["trajectory", "export", "--reports", str(reports_path),
+                                    "--output", str(baseline_path)]):
+                main()
+            self.assertEqual(export_report_collection(reports_path), load_results(baseline_path))
+            self.assertEqual(20, report_to_trajectory(report)["metrics"]["duration_ms"])
+            output = StringIO()
+            with patch("sys.argv", ["trajectory", "compare", "--baseline", str(baseline_path),
+                                    "--candidate", str(baseline_path), "--tasks", str(tasks_path),
+                                    "--format", "json"]), redirect_stdout(output):
+                main()
+            self.assertEqual(1.0, json.loads(output.getvalue())["candidate"]["success_rate"])
+            output = StringIO()
+            with patch("sys.argv", ["trajectory", "gate", "--baseline", str(baseline_path),
+                                    "--candidate", str(baseline_path), "--tasks", str(tasks_path),
+                                    "--format", "json"]), redirect_stdout(output):
+                main()
+            self.assertEqual("PASS", json.loads(output.getvalue())["status"])
+
+    def test_dataset_rejects_duplicate_ids(self):
+        row = {"task_id": "same", "category": "x", "input": "y",
+               "expected_tools": ["a"], "expected_answer_contains": ["ok"]}
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "tasks.jsonl"
+            path.write_text(json.dumps(row) + "\n" + json.dumps(row) + "\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "Duplicate"):
+                load_task_dataset(path)
 
 
 if __name__ == "__main__":
