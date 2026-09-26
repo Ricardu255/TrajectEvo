@@ -1,3 +1,5 @@
+[**简体中文**](MODEL_RUNTIME_FLOW.md) | [English](MODEL_RUNTIME_FLOW.en.md)
+
 # EVO 运行逻辑与轨迹回归评估
 
 同一批标注任务分别由基线版本和候选版本执行。每次审查生成的报告保存 `execution.trajectory`；收集两个版本的报告后，再运行独立的轨迹回归评估和发布门禁。
